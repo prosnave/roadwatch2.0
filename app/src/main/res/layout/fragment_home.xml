@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools" android:id="@+id/root" android:layout_width="match_parent" android:layout_height="match_parent" android:padding="@dimen/margin_horizontal" tools:context=".feature.home.HomeFragment">
+
+    <!-- App Logo -->
+    <ImageView android:id="@+id/logo" android:layout_width="@dimen/logo_size" android:layout_height="@dimen/logo_size" android:layout_marginTop="@dimen/space_24" android:contentDescription="@string/app_name" android:src="@drawable/ic_launcher_foreground" app:layout_constraintEnd_toEndOf="parent" app:layout_constraintStart_toStartOf="parent" app:layout_constraintTop_toTopOf="parent" />
+
+    <!-- Title -->
+    <TextView android:id="@+id/title" style="@style/TextAppearance.Material3.HeadlineMedium" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="@dimen/space_12" android:text="@string/app_name" android:textAlignment="center" app:layout_constraintEnd_toEndOf="parent" app:layout_constraintStart_toStartOf="parent" app:layout_constraintTop_toBottomOf="@+id/logo" />
+
+    <!-- Status Card -->
+    <com.google.android.material.card.MaterialCardView android:id="@+id/status_card" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_marginTop="@dimen/space_16" app:cardCornerRadius="@dimen/card_corner_radius" app:layout_constraintEnd_toEndOf="parent" app:layout_constraintStart_toStartOf="parent" app:layout_constraintTop_toBottomOf="@+id/title">
+
+        <TextView android:id="@+id/status_text" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="@dimen/margin_horizontal" android:text="@string/ready" android:textAlignment="center" style="@style/TextAppearance.Material3.BodyLarge" />
+
+    </com.google.android.material.card.MaterialCardView>
+
+    <!-- Start Drive Button -->
+    <com.google.android.material.button.MaterialButton android:id="@+id/btn_start_drive" style="@style/Widget.Material3.Button" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_marginTop="@dimen/space_16" android:minHeight="@dimen/touch_target_min" android:text="@string/start_drive_mode" app:layout_constraintEnd_toEndOf="parent" app:layout_constraintStart_toStartOf="parent" app:layout_constraintTop_toBottomOf="@+id/status_card" />
+
+    <!-- Stop Drive Button (Initially Gone) -->
+    <com.google.android.material.button.MaterialButton android:id="@+id/btn_stop_drive" style="@style/Widget.Material3.Button" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_marginTop="@dimen/space_16" android:minHeight="@dimen/touch_target_min" android:text="@string/stop_drive_mode" android:visibility="gone" app:backgroundTint="?attr/colorError" app:layout_constraintEnd_toEndOf="parent" app:layout_constraintStart_toStartOf="parent" app:layout_constraintTop_toBottomOf="@+id/status_card" />
+
+    <!-- Settings Button -->
+    <com.google.android.material.button.MaterialButton android:id="@+id/btn_open_settings" style="@style/Widget.Material3.Button.OutlinedButton" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_marginTop="@dimen/space_12" android:minHeight="@dimen/touch_target_min" android:text="@string/settings" app:layout_constraintEnd_toEndOf="parent" app:layout_constraintStart_toStartOf="parent" app:layout_constraintTop_toBottomOf="@+id/btn_start_drive" />
+
+</androidx.constraintlayout.widget.ConstraintLayout>

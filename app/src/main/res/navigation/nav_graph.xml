@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<navigation xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools" android:id="@+id/nav_graph" app:startDestination="@id/home">
+
+    <!-- Home Fragment -->
+    <fragment android:id="@+id/home" android:name="com.roadwatch.feature.home.HomeFragment" android:label="Home" tools:layout="@layout/fragment_home">
+        <action android:id="@+id/action_open_drive_hud" app:destination="@id/driveHud" />
+        <action android:id="@+id/action_open_settings" app:destination="@id/settings" />
+        <action android:id="@+id/action_open_locations" app:destination="@id/locations" />
+    </fragment>
+
+    <!-- Drive HUD Fragment -->
+    <fragment android:id="@+id/driveHud" android:name="com.roadwatch.feature.drive.DriveHudFragment" android:label="Drive Mode" tools:layout="@layout/fragment_drive_hud">
+        <action android:id="@+id/action_open_passenger" app:destination="@id/passengerBottomSheet" />
+        <action android:id="@+id/action_open_report" app:destination="@id/reportHazardBottomSheet" />
+    </fragment>
+
+    <!-- Locations Fragment -->
+    <fragment android:id="@+id/locations" android:name="com.roadwatch.feature.locations.LocationsFragment" android:label="Locations" tools:layout="@layout/fragment_locations">
+        <action android:id="@+id/action_open_report_from_locations" app:destination="@id/reportHazardBottomSheet" />
+    </fragment>
+
+    <!-- Settings Fragment -->
+    <fragment android:id="@+id/settings" android:name="com.roadwatch.feature.settings.SettingsFragment" android:label="Settings" tools:layout="@layout/fragment_settings">
+        <action android:id="@+id/action_open_passenger_from_settings" app:destination="@id/passengerBottomSheet" />
+    </fragment>
+
+    <!-- Map Full Fragment -->
+    <fragment android:id="@+id/mapFull" android:name="com.roadwatch.feature.map.MapFullFragment" android:label="Map" tools:layout="@layout/fragment_map_full" />
+
+    <!-- Bottom Sheets -->
+    <dialog android:id="@+id/passengerBottomSheet" android:name="com.roadwatch.feature.passenger.PassengerBottomSheet" android:label="Report Hazard" tools:layout="@layout/bottom_sheet_passenger" />
+
+    <dialog android:id="@+id/reportHazardBottomSheet" android:name="com.roadwatch.feature.report.ReportHazardBottomSheet" android:label="Report Hazard" tools:layout="@layout/bottom_sheet_report_hazard" />
+
+    <dialog android:id="@+id/alertPreviewBottomSheet" android:name="com.roadwatch.feature.settings.AlertPreviewBottomSheet" android:label="Alert Preview" tools:layout="@layout/bottom_sheet_alert_preview" />
+
+</navigation>
