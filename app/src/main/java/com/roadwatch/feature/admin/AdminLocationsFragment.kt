@@ -17,6 +17,8 @@ class AdminLocationsFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         val list = view.findViewById<ListView>(R.id.list)
+        val summaryBody = view.findViewById<TextView>(R.id.txt_summary_body)
+        val toggle = view.findViewById<Button>(R.id.btn_toggle_summary)
         val repo = SeedRepository(requireContext())
         val store = HazardStore(requireContext())
 
@@ -31,13 +33,23 @@ class AdminLocationsFragment : Fragment() {
                 val key = SeedOverrides.keyOf(h)
                 val active = h.active && !SeedOverrides.isDisabled(requireContext(), key)
                 val votes = CommunityVotes.getVotes(requireContext(), key)
-                rows += Row(label = "${h.type} • ${if (active) "Active" else "Inactive"} • votes: ${votes}", isUser = false, userId = null, seedKey = key, active = active, votes = votes)
+                val createdAt = try { h.createdAt.toString() } catch (_: Exception) { "" }
+                rows += Row(label = buildLabel(h.type.name, active, votes, createdAt), isUser = false, userId = null, seedKey = key, active = active, votes = votes)
             }
             userHazards.forEach { u ->
                 val key = SeedOverrides.keyOf(u.hazard)
                 val votes = CommunityVotes.getVotes(requireContext(), key)
-                rows += Row(label = "${u.hazard.type} • ${if (u.hazard.active) "Active" else "Inactive"} • votes: ${votes}", isUser = true, userId = u.id, seedKey = null, active = u.hazard.active, votes = votes)
+                val createdAt = try { u.hazard.createdAt.toString() } catch (_: Exception) { "" }
+                rows += Row(label = buildLabel(u.hazard.type.name, u.hazard.active, votes, createdAt), isUser = true, userId = u.id, seedKey = null, active = u.hazard.active, votes = votes)
             }
+            // Summary
+            val total = rows.size
+            val activeCount = rows.count { it.active }
+            val byType = (seedHazards.map { it.type.name } + userHazards.map { it.hazard.type.name })
+                .groupingBy { it }
+                .eachCount()
+            val typeLines = byType.entries.sortedBy { it.key }.joinToString("\n") { "- ${it.key}: ${it.value}" }
+            summaryBody?.text = "Total: ${total} (Active: ${activeCount})\n${typeLines}"
             list.adapter = object : BaseAdapter() {
                 override fun getCount() = rows.size
                 override fun getItem(position: Int) = rows[position]
@@ -86,6 +98,19 @@ class AdminLocationsFragment : Fragment() {
                     .show()
             }
         }
+        toggle?.setOnClickListener {
+            if (summaryBody?.visibility == View.VISIBLE) {
+                summaryBody.visibility = View.GONE
+                (it as Button).text = "Show"
+            } else {
+                summaryBody?.visibility = View.VISIBLE
+                (it as Button).text = "Hide"
+            }
+        }
+
         refresh()
     }
+
+    private fun buildLabel(type: String, active: Boolean, votes: Int, created: String): String =
+        "$type • ${if (active) "Active" else "Inactive"} • votes: $votes • $created"
 }

@@ -20,10 +20,15 @@ object SeedOverrides {
         prefs(context).edit().putStringSet(KEY_DISABLED, set).apply()
     }
 
+    fun setDisabled(context: Context, key: String, disabled: Boolean) {
+        val set = prefs(context).getStringSet(KEY_DISABLED, mutableSetOf())?.toMutableSet() ?: mutableSetOf()
+        if (disabled) set.add(key) else set.remove(key)
+        prefs(context).edit().putStringSet(KEY_DISABLED, set).apply()
+    }
+
     private fun MutableSet<String>.addOrRemove(value: String): Boolean {
         return if (contains(value)) { remove(value); true } else { add(value); true }
     }
 
     private fun Double.format6(): String = String.format(java.util.Locale.US, "%.6f", this)
 }
-

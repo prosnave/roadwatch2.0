@@ -30,7 +30,7 @@ class AlertManager(private val context: Context) {
 
     fun onLocationUpdate(loc: Location) {
         if (AppPrefs.isMuted(context)) return
-        val hazards = repo.allHazards().filter { it.active }
+        val hazards = repo.activeHazards()
         handleZones(loc, hazards)
         val target = upcomingHazard(loc, hazards.filter { it.type.name != "SPEED_LIMIT_ZONE" }) ?: return
         val now = System.currentTimeMillis()

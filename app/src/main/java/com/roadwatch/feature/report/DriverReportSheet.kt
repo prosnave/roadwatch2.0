@@ -43,17 +43,21 @@ class DriverReportSheet : BottomSheetDialogFragment() {
                 return
             }
             val repo = SeedRepository(requireContext())
-            val ok = repo.addUserHazard(
-                Hazard(
-                    type = selected,
-                    lat = loc.latitude,
-                    lng = loc.longitude,
-                    active = true,
-                    source = "USER",
-                    createdAt = Instant.now()
+            val result = repo.addUserHazardWithDedup(
+                    Hazard(
+                        type = selected,
+                        lat = loc.latitude,
+                        lng = loc.longitude,
+                        active = true,
+                        source = "USER",
+                        createdAt = Instant.now()
+                    )
                 )
-            )
-            Toast.makeText(requireContext(), if (ok) "Reported ${selected.name}" else "Report failed", Toast.LENGTH_SHORT).show()
+            when (result) {
+                SeedRepository.AddResult.ADDED -> Toast.makeText(requireContext(), "Reported ${selected.name}", Toast.LENGTH_SHORT).show()
+                SeedRepository.AddResult.DUPLICATE_NEARBY -> Toast.makeText(requireContext(), "Similar ${selected.name.lowercase().replace('_',' ')} within 30 m", Toast.LENGTH_SHORT).show()
+                else -> Toast.makeText(requireContext(), "Report failed", Toast.LENGTH_SHORT).show()
+            }
             dismissAllowingStateLoss()
         }
 

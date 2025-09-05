@@ -98,13 +98,24 @@ class SettingsFragment : Fragment() {
         btnExport.setOnClickListener {
             ioScope.launch {
                 val repo = SeedRepository(requireContext())
-                val (result, hazards) = repo.loadSeeds()
+                val (seedLoad, seeds) = repo.loadSeeds()
+                val users = repo.loadUserHazards().map { it.hazard }
                 val exportDir = File(requireContext().filesDir, "exports").apply { mkdirs() }
                 val out = File(exportDir, "hazards_export.csv")
                 out.bufferedWriter().use { w ->
-                    w.appendLine("type,lat,lng")
-                    hazards.forEach { h ->
-                        w.appendLine("${h.type},${h.lat},${h.lng}")
+                    w.appendLine("type,lat,lng,source,active,votes,bearingSide,directionality,createdAt,speedLimitKph,zoneLengthMeters")
+                    // Seeds with active based on overrides
+                    seeds.forEach { h ->
+                        val key = com.roadwatch.data.SeedOverrides.keyOf(h)
+                        val active = h.active && !com.roadwatch.data.SeedOverrides.isDisabled(requireContext(), key)
+                        val votes = com.roadwatch.data.CommunityVotes.getVotes(requireContext(), key)
+                        w.appendLine("${h.type},${h.lat},${h.lng},SEED,${active},${votes},${h.bearingSide},${h.directionality},,${h.speedLimitKph ?: ""},${h.zoneLengthMeters ?: ""}")
+                    }
+                    // User hazards
+                    users.forEach { h ->
+                        val key = com.roadwatch.data.SeedOverrides.keyOf(h)
+                        val votes = com.roadwatch.data.CommunityVotes.getVotes(requireContext(), key)
+                        w.appendLine("${h.type},${h.lat},${h.lng},USER,${h.active},${votes},${h.bearingSide},${h.directionality},${h.createdAt},${h.speedLimitKph ?: ""},${h.zoneLengthMeters ?: ""}")
                     }
                 }
                 // Also copy to public Downloads/RoadWatch (Android Q+)
@@ -125,7 +136,8 @@ class SettingsFragment : Fragment() {
                     } catch (_: Exception) {}
                 }
                 requireActivity().runOnUiThread {
-                    status.text = if (result.loaded) "Exported ${hazards.size} hazards (and copied to Downloads/RoadWatch if available)" else "Export failed"
+                    val total = seeds.size + users.size
+                    status.text = if (seedLoad.loaded) "Exported ${total} hazards (seeds + user)" else "Export completed (seed load status: failed)"
                 }
             }
         }
@@ -150,9 +162,55 @@ class SettingsFragment : Fragment() {
             ioScope.launch {
                 val exportDir = File(requireContext().filesDir, "exports")
                 val file = File(exportDir, "hazards_export.csv")
-                val count = if (file.exists()) file.readLines().drop(1).size else 0
+                var imported = 0
+                if (file.exists()) {
+                    file.bufferedReader().useLines { lines ->
+                        val iter = lines.iterator()
+                        if (iter.hasNext()) iter.next() // skip header
+                        while (iter.hasNext()) {
+                            val raw = iter.next().trim()
+                            if (raw.isEmpty()) continue
+                            val cols = raw.split(',')
+                            try {
+                                val type = com.roadwatch.data.HazardType.valueOf(cols[0])
+                                val lat = cols[1].toDouble()
+                                val lng = cols[2].toDouble()
+                                val source = cols.getOrNull(3) ?: "USER"
+                                val active = cols.getOrNull(4)?.toBooleanStrictOrNull() ?: true
+                                val votes = cols.getOrNull(5)?.toIntOrNull() ?: 0
+                                val bearingSide = cols.getOrNull(6) ?: "UNKNOWN"
+                                val directionality = cols.getOrNull(7) ?: "UNKNOWN"
+                                val createdAt = cols.getOrNull(8) ?: ""
+                                val speedKph = cols.getOrNull(9)?.toIntOrNull()
+                                val zoneLen = cols.getOrNull(10)?.toIntOrNull()
+                                val h = com.roadwatch.data.Hazard(
+                                    type = type,
+                                    lat = lat,
+                                    lng = lng,
+                                    active = active,
+                                    bearingSide = bearingSide,
+                                    directionality = directionality,
+                                    speedLimitKph = speedKph,
+                                    zoneLengthMeters = zoneLen,
+                                )
+                                val key = com.roadwatch.data.SeedOverrides.keyOf(h)
+                                // Merge votes (take max of local and imported)
+                                val localVotes = com.roadwatch.data.CommunityVotes.getVotes(requireContext(), key)
+                                if (votes > localVotes) com.roadwatch.data.CommunityVotes.setVotes(requireContext(), key, votes)
+                                if (source == "USER") {
+                                    // Upsert into user hazards
+                                    com.roadwatch.data.HazardStore(requireContext()).upsertByKey(key, h)
+                                } else {
+                                    // Apply active override to seeds
+                                    com.roadwatch.data.SeedOverrides.setDisabled(requireContext(), key, !active)
+                                }
+                                imported++
+                            } catch (_: Exception) {}
+                        }
+                    }
+                }
                 requireActivity().runOnUiThread {
-                    status.text = if (count > 0) "Imported $count hazards" else "No export file found"
+                    status.text = if (imported > 0) "Imported $imported rows (merged)" else "No export file found or empty"
                 }
             }
         }

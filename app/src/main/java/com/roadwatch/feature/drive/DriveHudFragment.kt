@@ -103,29 +103,7 @@ class DriveHudFragment : Fragment() {
                 val top = (view.findViewById<View>(R.id.mute_chip).height + view.findViewById<View>(R.id.next_chip).height + dp(16)).coerceAtLeast(dp(16))
                 gMap.setPadding(dp(16), top, dp(16), bottom)
             }
-            ioScope.launch {
-                val repo = SeedRepository(requireContext())
-                val (_, hazards) = repo.loadSeeds()
-                withContext(Dispatchers.Main) {
-                    if (hazards.isNotEmpty()) {
-                        val first = LatLng(hazards.first().lat, hazards.first().lng)
-                        if (firstFix) gMap.moveCamera(CameraUpdateFactory.newLatLngZoom(first, 12f))
-                    }
-                    hazards.take(200).forEach { h ->
-                        val iconRes = when (h.type) {
-                            com.roadwatch.data.HazardType.SPEED_BUMP -> com.roadwatch.app.R.drawable.ic_marker_bump
-                            com.roadwatch.data.HazardType.RUMBLE_STRIP -> com.roadwatch.app.R.drawable.ic_marker_rumble
-                            com.roadwatch.data.HazardType.POTHOLE -> com.roadwatch.app.R.drawable.ic_marker_pothole
-                            else -> com.roadwatch.app.R.drawable.ic_marker_bump
-                        }
-                        val scale = 1.0f + (getVotesFor(h) / 10.0f)
-                        val icon = vectorToBitmapDescriptor(iconRes, scale)
-                        gMap.addMarker(
-                            MarkerOptions().position(LatLng(h.lat, h.lng)).title(h.type.name).icon(icon)
-                        )
-                    }
-                }
-            }
+            refreshMarkers()
         }
 
         // Controls
@@ -277,7 +255,7 @@ class DriveHudFragment : Fragment() {
                         Toast.makeText(requireContext(), "Location unavailable", Toast.LENGTH_SHORT).show()
                         return@requestSingleFix
                     }
-                    val ok = SeedRepository(requireContext()).addUserHazard(
+                    val result = SeedRepository(requireContext()).addUserHazardWithDedup(
                         Hazard(
                             type = type,
                             lat = loc.latitude,
@@ -287,7 +265,15 @@ class DriveHudFragment : Fragment() {
                             createdAt = Instant.now()
                         )
                     )
-                    Toast.makeText(requireContext(), if (ok) "Reported ${type.name}" else "Report failed", Toast.LENGTH_SHORT).show()
+                    when (result) {
+                        com.roadwatch.data.SeedRepository.AddResult.ADDED -> {
+                            Toast.makeText(requireContext(), "Reported ${type.name}", Toast.LENGTH_SHORT).show()
+                            refreshMarkers()
+                        }
+                        com.roadwatch.data.SeedRepository.AddResult.DUPLICATE_NEARBY ->
+                            Toast.makeText(requireContext(), "Similar ${type.name.lowercase().replace('_',' ')} already within 30 m", Toast.LENGTH_SHORT).show()
+                        else -> Toast.makeText(requireContext(), "Report failed", Toast.LENGTH_SHORT).show()
+                    }
                 }
             }
             .setNegativeButton("Cancel", null)
@@ -388,7 +374,7 @@ class DriveHudFragment : Fragment() {
         val chipText = view?.findViewById<android.widget.TextView>(R.id.txt_next_hazard)
         val subtitle = view?.findViewById<android.widget.TextView>(R.id.txt_next_subtitle)
         if (chip == null || chipText == null) return
-        val hazards = SeedRepository(requireContext()).allHazards().filter { it.active }
+        val hazards = SeedRepository(requireContext()).activeHazards()
         var bestLabel: String? = null
         var bestDist = Double.MAX_VALUE
         var bestType: String? = null
@@ -431,6 +417,32 @@ class DriveHudFragment : Fragment() {
             m < 200 -> "${(m / 10) * 10} m"
             m < 1000 -> "${(m / 50) * 50} m"
             else -> String.format(java.util.Locale.US, "%.1f km", m / 1000.0)
+        }
+    }
+    private fun refreshMarkers() {
+        val map = googleMap ?: return
+        ioScope.launch {
+            val hazards = SeedRepository(requireContext()).activeHazards()
+            withContext(Dispatchers.Main) {
+                map.clear()
+                if (hazards.isNotEmpty()) {
+                    val first = LatLng(hazards.first().lat, hazards.first().lng)
+                    if (firstFix) map.moveCamera(CameraUpdateFactory.newLatLngZoom(first, 12f))
+                }
+                hazards.take(500).forEach { h ->
+                    val iconRes = when (h.type) {
+                        com.roadwatch.data.HazardType.SPEED_BUMP -> com.roadwatch.app.R.drawable.ic_marker_bump
+                        com.roadwatch.data.HazardType.RUMBLE_STRIP -> com.roadwatch.app.R.drawable.ic_marker_rumble
+                        com.roadwatch.data.HazardType.POTHOLE -> com.roadwatch.app.R.drawable.ic_marker_pothole
+                        else -> com.roadwatch.app.R.drawable.ic_marker_bump
+                    }
+                    val scale = 1.0f + (getVotesFor(h) / 10.0f)
+                    val icon = vectorToBitmapDescriptor(iconRes, scale)
+                    map.addMarker(
+                        MarkerOptions().position(LatLng(h.lat, h.lng)).title(h.type.name).icon(icon)
+                    )
+                }
+            }
         }
     }
 }

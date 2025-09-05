@@ -81,6 +81,17 @@ class HazardStore(private val context: Context) {
         return writeAll(updated)
     }
 
+    fun upsertByKey(key: String, hazard: Hazard): Boolean {
+        val items = list().toMutableList()
+        val idx = items.indexOfFirst { SeedOverrides.keyOf(it.hazard) == key }
+        return if (idx >= 0) {
+            items[idx] = items[idx].copy(hazard = hazard)
+            writeAll(items)
+        } else {
+            add(hazard)
+        }
+    }
+
     private fun writeAll(items: List<UserHazard>): Boolean {
         return try {
             file.writeText("id,type,lat,lng,active,bearingSide,directionality,source,createdAt\n")
@@ -112,4 +123,3 @@ data class UserHazard(
     val id: String,
     val hazard: Hazard,
 )
-

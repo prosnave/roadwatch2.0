@@ -30,4 +30,9 @@ object CommunityVotes {
 
     fun hasVoted(context: Context, key: String): Boolean =
         prefs(context).getStringSet(KEY_VOTED, emptySet())?.contains(key) == true
+
+    fun setVotes(context: Context, key: String, votes: Int) {
+        val safe = if (votes < 0) 0 else votes
+        prefs(context).edit().putInt(key, safe).apply()
+    }
 }

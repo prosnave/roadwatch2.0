@@ -54,9 +54,44 @@ class SeedRepository(private val context: Context) {
 
     fun addUserHazard(hazard: Hazard): Boolean = HazardStore(context).add(hazard)
 
-    fun allHazards(): List<Hazard> {
+    /**
+     * Returns seeds + user hazards filtered for visibility:
+     * - Excludes seed hazards disabled via SeedOverrides
+     * - Excludes inactive user hazards
+     */
+    fun activeHazards(): List<Hazard> {
         val (_, seeds) = loadSeeds()
         val users = loadUserHazards().map { it.hazard }
-        return seeds + users
+        val visibleSeeds = seeds.filter { h -> !SeedOverrides.isDisabled(context, SeedOverrides.keyOf(h)) && h.active }
+        val visibleUsers = users.filter { it.active }
+        return visibleSeeds + visibleUsers
+    }
+
+    enum class AddResult { ADDED, DUPLICATE_NEARBY, ERROR }
+
+    /**
+     * Add a user hazard with de-duplication: prevent adding the same type within [thresholdMeters]
+     * of any existing active hazard (seed or user).
+     */
+    fun addUserHazardWithDedup(hazard: Hazard, thresholdMeters: Double = 30.0): AddResult {
+        return try {
+            val existing = activeHazards()
+            val dup = existing.any { it.type == hazard.type && distanceMeters(it.lat, it.lng, hazard.lat, hazard.lng) < thresholdMeters }
+            if (dup) return AddResult.DUPLICATE_NEARBY
+            if (HazardStore(context).add(hazard)) AddResult.ADDED else AddResult.ERROR
+        } catch (t: Throwable) {
+            AddResult.ERROR
+        }
+    }
+
+    private fun distanceMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+        val R = 6371000.0
+        val dLat = Math.toRadians(lat2 - lat1)
+        val dLon = Math.toRadians(lon2 - lon1)
+        val a = kotlin.math.sin(dLat / 2) * kotlin.math.sin(dLat / 2) +
+                kotlin.math.cos(Math.toRadians(lat1)) * kotlin.math.cos(Math.toRadians(lat2)) *
+                kotlin.math.sin(dLon / 2) * kotlin.math.sin(dLon / 2)
+        val c = 2 * kotlin.math.atan2(kotlin.math.sqrt(a), kotlin.math.sqrt(1 - a))
+        return R * c
     }
 }

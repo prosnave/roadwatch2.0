@@ -94,8 +94,12 @@ class PassengerReportSheet : BottomSheetDialogFragment() {
                 val length = if (start != null && end != null) distance(start!!, end!!).toInt() else null
                 h = h.copy(speedLimitKph = kph, zoneLengthMeters = length)
             }
-            val ok = SeedRepository(requireContext()).addUserHazard(h)
-            Toast.makeText(requireContext(), if (ok) "Reported ${type.name}" else "Report failed", Toast.LENGTH_SHORT).show()
+            val result = SeedRepository(requireContext()).addUserHazardWithDedup(h)
+            when (result) {
+                com.roadwatch.data.SeedRepository.AddResult.ADDED -> Toast.makeText(requireContext(), "Reported ${type.name}", Toast.LENGTH_SHORT).show()
+                com.roadwatch.data.SeedRepository.AddResult.DUPLICATE_NEARBY -> Toast.makeText(requireContext(), "Similar ${type.name.lowercase().replace('_',' ')} within 30 m", Toast.LENGTH_SHORT).show()
+                else -> Toast.makeText(requireContext(), "Report failed", Toast.LENGTH_SHORT).show()
+            }
             dismissAllowingStateLoss()
         }
     }
