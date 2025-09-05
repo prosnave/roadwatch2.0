@@ -79,13 +79,16 @@ class PassengerReportSheet : BottomSheetDialogFragment() {
                 Toast.makeText(requireContext(), "Location unavailable", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
+            fun defaultDirectionality(t: HazardType): String = when (t) {
+                HazardType.SPEED_BUMP, HazardType.POTHOLE, HazardType.RUMBLE_STRIP, HazardType.SPEED_LIMIT_ZONE -> "BIDIRECTIONAL"
+            }
             var h = Hazard(
                 type = type,
                 lat = loc.latitude,
                 lng = loc.longitude,
                 active = true,
                 bearingSide = lane,
-                directionality = "UNKNOWN",
+                directionality = defaultDirectionality(type),
                 source = "USER",
                 createdAt = Instant.now()
             )

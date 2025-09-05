@@ -43,6 +43,7 @@ class SettingsFragment : Fragment() {
         val btnExport = view.findViewById<Button>(R.id.btn_export)
         val btnImport = view.findViewById<Button>(R.id.btn_import)
         val btnAdmin = view.findViewById<Button>(R.id.btn_admin)
+        val btnReset = view.findViewById<Button>(R.id.btn_reset_data)
         val btnShare = view.findViewById<Button>(R.id.btn_share_export)
         val switchBg = view.findViewById<android.widget.Switch>(R.id.switch_bg_alerts)
         val spnFocus = view.findViewById<android.widget.Spinner>(R.id.spn_audio_focus)
@@ -52,6 +53,8 @@ class SettingsFragment : Fragment() {
         val edtZoneExit = view.findViewById<android.widget.EditText>(R.id.edt_zone_exit)
         val edtZoneRepeat = view.findViewById<android.widget.EditText>(R.id.edt_zone_repeat)
         val btnZoneSave = view.findViewById<Button>(R.id.btn_zone_save)
+        val switchCluster = view.findViewById<android.widget.Switch>(R.id.switch_cluster_enabled)
+        val edtClusterSpeed = view.findViewById<android.widget.EditText>(R.id.edt_cluster_speed)
 
         // Admin/Public: show button with different label
         val isAdmin = BuildConfig.IS_ADMIN
@@ -59,6 +62,7 @@ class SettingsFragment : Fragment() {
         btnExport.visibility = if (isAdmin) View.VISIBLE else View.GONE
         btnImport.visibility = if (isAdmin) View.VISIBLE else View.GONE
         btnShare.visibility = if (isAdmin) View.VISIBLE else View.GONE
+        btnReset.visibility = if (isAdmin) View.VISIBLE else View.GONE
 
         btnReload.setOnClickListener {
             android.app.AlertDialog.Builder(requireContext())
@@ -94,6 +98,32 @@ class SettingsFragment : Fragment() {
                 status.text = getString(R.string.test_alert)
             }
         }
+
+        btnReset.setOnClickListener {
+            android.app.AlertDialog.Builder(requireContext())
+                .setTitle("Reset Local Data")
+                .setMessage("This will delete local user hazards, clear seed overrides and votes. Seed data stays.")
+                .setPositiveButton("Reset") { _, _ ->
+                    ioScope.launch {
+                        // Delete user hazards CSV
+                        try {
+                            val f = java.io.File(requireContext().filesDir, "user_hazards.csv")
+                            if (f.exists()) f.delete()
+                        } catch (_: Exception) {}
+                        // Clear overrides and votes
+                        try { requireContext().getSharedPreferences("seed_overrides", android.content.Context.MODE_PRIVATE).edit().clear().apply() } catch (_: Exception) {}
+                        try { requireContext().getSharedPreferences("community_votes", android.content.Context.MODE_PRIVATE).edit().clear().apply() } catch (_: Exception) {}
+                        requireActivity().runOnUiThread {
+                            status.text = "Local data reset."
+                            android.widget.Toast.makeText(requireContext(), "Local data reset", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }
+
+        // Removed duplicate clear-all button; Reset Local Data covers local cleanup.
 
         btnExport.setOnClickListener {
             ioScope.launch {
@@ -233,6 +263,10 @@ class SettingsFragment : Fragment() {
         edtZoneExit.setText(com.roadwatch.prefs.AppPrefs.getZoneExit(requireContext()))
         edtZoneRepeat.setText(com.roadwatch.prefs.AppPrefs.getZoneRepeatMs(requireContext()).toString())
 
+        // Cluster controls
+        switchCluster.isChecked = com.roadwatch.prefs.AppPrefs.isClusterEnabled(requireContext())
+        edtClusterSpeed.setText(com.roadwatch.prefs.AppPrefs.getClusterSpeedThreshold(requireContext()).toString())
+
         // Add audio/visual alert toggles and default mute duration controls
         val audioSwitch = view.findViewById<android.widget.Switch>(R.id.switch_audio)
         val visualSwitch = view.findViewById<android.widget.Switch>(R.id.switch_visual)
@@ -244,6 +278,14 @@ class SettingsFragment : Fragment() {
         muteInput.setText(com.roadwatch.prefs.AppPrefs.getDefaultMuteMinutes(requireContext()).toString())
         audioSwitch.setOnCheckedChangeListener { _, checked -> com.roadwatch.prefs.AppPrefs.setAlertChannels(requireContext(), checked, com.roadwatch.prefs.AppPrefs.isVisualEnabled(requireContext())) }
         visualSwitch.setOnCheckedChangeListener { _, checked -> com.roadwatch.prefs.AppPrefs.setAlertChannels(requireContext(), com.roadwatch.prefs.AppPrefs.isAudioEnabled(requireContext()), checked) }
+        switchCluster.setOnCheckedChangeListener { _, checked -> com.roadwatch.prefs.AppPrefs.setClusterEnabled(requireContext(), checked) }
+        edtClusterSpeed.setOnFocusChangeListener { _, hasFocus ->
+            if (!hasFocus) {
+                val kph = edtClusterSpeed.text.toString().toIntOrNull() ?: 50
+                com.roadwatch.prefs.AppPrefs.setClusterSpeedThreshold(requireContext(), kph)
+                edtClusterSpeed.setText(com.roadwatch.prefs.AppPrefs.getClusterSpeedThreshold(requireContext()).toString())
+            }
+        }
         muteSave.setOnClickListener {
             val v = muteInput.text.toString().toIntOrNull() ?: 20
             com.roadwatch.prefs.AppPrefs.setDefaultMuteMinutes(requireContext(), v)

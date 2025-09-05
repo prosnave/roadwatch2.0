@@ -43,16 +43,21 @@ class DriverReportSheet : BottomSheetDialogFragment() {
                 return
             }
             val repo = SeedRepository(requireContext())
+            fun defaultDirectionality(t: HazardType): String = when (t) {
+                HazardType.SPEED_BUMP, HazardType.POTHOLE, HazardType.RUMBLE_STRIP, HazardType.SPEED_LIMIT_ZONE -> "BIDIRECTIONAL"
+            }
             val result = repo.addUserHazardWithDedup(
-                    Hazard(
-                        type = selected,
-                        lat = loc.latitude,
-                        lng = loc.longitude,
-                        active = true,
-                        source = "USER",
-                        createdAt = Instant.now()
-                    )
+                Hazard(
+                    type = selected,
+                    lat = loc.latitude,
+                    lng = loc.longitude,
+                    bearingSide = "CENTER",
+                    directionality = defaultDirectionality(selected),
+                    active = true,
+                    source = "USER",
+                    createdAt = Instant.now()
                 )
+            )
             when (result) {
                 SeedRepository.AddResult.ADDED -> Toast.makeText(requireContext(), "Reported ${selected.name}", Toast.LENGTH_SHORT).show()
                 SeedRepository.AddResult.DUPLICATE_NEARBY -> Toast.makeText(requireContext(), "Similar ${selected.name.lowercase().replace('_',' ')} within 30 m", Toast.LENGTH_SHORT).show()

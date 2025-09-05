@@ -15,6 +15,8 @@ object AppPrefs {
     private const val KEY_AUDIO_ENABLED = "audio_enabled"
     private const val KEY_VISUAL_ENABLED = "visual_enabled"
     private const val KEY_DEFAULT_MUTE_MIN = "default_mute_min"
+    private const val KEY_CLUSTER_ENABLED = "cluster_enabled"
+    private const val KEY_CLUSTER_SPEED_KPH = "cluster_speed_kph"
 
     fun setMutedForMinutes(context: Context, minutes: Int) {
         val until = System.currentTimeMillis() + minutes * 60_000L
@@ -109,4 +111,22 @@ object AppPrefs {
     fun getDefaultMuteMinutes(context: Context): Int =
         context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
             .getInt(KEY_DEFAULT_MUTE_MIN, 20)
+
+    // Clustering controls
+    fun setClusterEnabled(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .edit().putBoolean(KEY_CLUSTER_ENABLED, enabled).apply()
+    }
+    fun isClusterEnabled(context: Context): Boolean =
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .getBoolean(KEY_CLUSTER_ENABLED, true)
+
+    fun setClusterSpeedThreshold(context: Context, kph: Int) {
+        val safe = if (kph < 10) 10 else if (kph > 120) 120 else kph
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .edit().putInt(KEY_CLUSTER_SPEED_KPH, safe).apply()
+    }
+    fun getClusterSpeedThreshold(context: Context): Int =
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .getInt(KEY_CLUSTER_SPEED_KPH, 50)
 }

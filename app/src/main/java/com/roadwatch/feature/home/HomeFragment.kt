@@ -42,13 +42,9 @@ class HomeFragment : Fragment() {
 
         ioScope.launch {
             val repo = SeedRepository(requireContext())
-            val (result, _) = repo.loadSeeds()
+            val visible = repo.activeHazards().size
             withContext(Dispatchers.Main) {
-                statusText.text = if (result.loaded) {
-                    "Ready • Seeds loaded: ${result.count}"
-                } else {
-                    "Ready • Seed load failed"
-                }
+                statusText.text = "Ready • Visible hazards: ${visible}"
             }
         }
 

@@ -8,6 +8,8 @@ import android.widget.*
 import androidx.fragment.app.Fragment
 import com.roadwatch.app.R
 import com.roadwatch.data.*
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 class AdminLocationsFragment : Fragment() {
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? {
@@ -23,7 +25,7 @@ class AdminLocationsFragment : Fragment() {
         val store = HazardStore(requireContext())
 
         val isAdmin = com.roadwatch.app.BuildConfig.IS_ADMIN
-        data class Row(val label: String, val isUser: Boolean, val userId: String?, val seedKey: String?, val active: Boolean, val votes: Int)
+        data class Row(val label: String, val isUser: Boolean, val userId: String?, val seedKey: String?, val active: Boolean, val votes: Int, val bearingSide: String, val directionality: String)
 
         fun refresh() {
             val seedHazards = repo.loadSeeds().second
@@ -31,16 +33,18 @@ class AdminLocationsFragment : Fragment() {
             val rows = mutableListOf<Row>()
             seedHazards.forEach { h ->
                 val key = SeedOverrides.keyOf(h)
-                val active = h.active && !SeedOverrides.isDisabled(requireContext(), key)
+                // Hide disabled seeds entirely so the list reflects what is actually active/visible
+                if (SeedOverrides.isDisabled(requireContext(), key)) return@forEach
+                val active = h.active
                 val votes = CommunityVotes.getVotes(requireContext(), key)
                 val createdAt = try { h.createdAt.toString() } catch (_: Exception) { "" }
-                rows += Row(label = buildLabel(h.type.name, active, votes, createdAt), isUser = false, userId = null, seedKey = key, active = active, votes = votes)
+                rows += Row(label = buildLabel(h.type.name, active, votes, createdAt, h.bearingSide, h.directionality), isUser = false, userId = null, seedKey = key, active = active, votes = votes, bearingSide = h.bearingSide, directionality = h.directionality)
             }
             userHazards.forEach { u ->
                 val key = SeedOverrides.keyOf(u.hazard)
                 val votes = CommunityVotes.getVotes(requireContext(), key)
                 val createdAt = try { u.hazard.createdAt.toString() } catch (_: Exception) { "" }
-                rows += Row(label = buildLabel(u.hazard.type.name, u.hazard.active, votes, createdAt), isUser = true, userId = u.id, seedKey = null, active = u.hazard.active, votes = votes)
+                rows += Row(label = buildLabel(u.hazard.type.name, u.hazard.active, votes, createdAt, u.hazard.bearingSide, u.hazard.directionality), isUser = true, userId = u.id, seedKey = null, active = u.hazard.active, votes = votes, bearingSide = u.hazard.bearingSide, directionality = u.hazard.directionality)
             }
             // Summary
             val total = rows.size
@@ -111,6 +115,10 @@ class AdminLocationsFragment : Fragment() {
         refresh()
     }
 
-    private fun buildLabel(type: String, active: Boolean, votes: Int, created: String): String =
-        "$type • ${if (active) "Active" else "Inactive"} • votes: $votes • $created"
+    private fun buildLabel(type: String, active: Boolean, votes: Int, created: String, bearingSide: String, directionality: String): String {
+        val instant = try { java.time.Instant.parse(created) } catch (_: Exception) { java.time.Instant.EPOCH }
+        val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").withZone(ZoneId.of("Africa/Nairobi"))
+        val formattedDate = formatter.format(instant)
+        return "$type • ${if (active) "Active" else "Inactive"} • votes: $votes • $formattedDate\nBearing: $bearingSide, Direction: $directionality"
+    }
 }

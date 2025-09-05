@@ -48,6 +48,16 @@
                 <Button android:id="@+id/btn_share_export" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Share Export" android:layout_marginTop="8dp" />
                 <Button android:id="@+id/btn_import" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/import_hazards" android:layout_marginTop="8dp" />
                 <Button android:id="@+id/btn_admin" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Manage Locations" android:layout_marginTop="8dp" />
+                <Button android:id="@+id/btn_reset_data" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Reset Local Data" android:layout_marginTop="8dp" />
+                
+
+                <!-- Clustering controls -->
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Alert Clustering" android:textStyle="bold" android:layout_marginTop="12dp" />
+                <Switch android:id="@+id/switch_cluster_enabled" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Enable clustering at speed" />
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginTop="6dp">
+                    <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Cluster speed threshold (kph)" />
+                    <EditText android:id="@+id/edt_cluster_speed" android:layout_width="96dp" android:layout_height="wrap_content" android:inputType="number" android:hint="50" />
+                </LinearLayout>
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 

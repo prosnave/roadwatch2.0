@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import java.io.BufferedReader
 import java.io.InputStreamReader
+import java.io.FileNotFoundException
 import java.time.Instant
 
 class SeedRepository(private val context: Context) {
@@ -18,8 +19,15 @@ class SeedRepository(private val context: Context) {
                     val cols = header.split(',').map { it.trim().lowercase() }
                     val idxType = cols.indexOf("type")
                     val idxLat = cols.indexOf("lat")
-                    var idxLng = cols.indexOf("lng")
-                    if (idxLng == -1) idxLng = cols.indexOf("lon")
+                    var idxLng = cols.indexOf("lng").let { if (it == -1) cols.indexOf("lon") else it }
+                    val idxBearingSide = cols.indexOf("bearingside")
+                    val idxDirectionality = cols.indexOf("directionality")
+                    val idxSpeedKph = cols.indexOf("speedlimitkph")
+                    val idxZoneLen = cols.indexOf("zonelengthmeters")
+
+                    fun defaultDirectionality(t: HazardType): String = when (t) {
+                        HazardType.SPEED_BUMP, HazardType.POTHOLE, HazardType.RUMBLE_STRIP, HazardType.SPEED_LIMIT_ZONE -> "BIDIRECTIONAL"
+                    }
 
                     var line: String?
                     while (reader.readLine().also { line = it } != null) {
@@ -31,10 +39,19 @@ class SeedRepository(private val context: Context) {
                             val type = HazardType.fromString(typeStr) ?: continue
                             val lat = parts.getOrNull(idxLat)?.toDoubleOrNull() ?: continue
                             val lng = parts.getOrNull(idxLng)?.toDoubleOrNull() ?: continue
+                            val bearingSide = if (idxBearingSide >= 0) parts.getOrNull(idxBearingSide).orEmpty().ifBlank { "CENTER" } else "CENTER"
+                            val directionality = if (idxDirectionality >= 0) parts.getOrNull(idxDirectionality).orEmpty().ifBlank { defaultDirectionality(type) } else defaultDirectionality(type)
+                            val speedKph = if (idxSpeedKph >= 0) parts.getOrNull(idxSpeedKph)?.toIntOrNull() else null
+                            val zoneLen = if (idxZoneLen >= 0) parts.getOrNull(idxZoneLen)?.toIntOrNull() else null
                             hazards += Hazard(
                                 type = type,
                                 lat = lat,
                                 lng = lng,
+                                bearingSide = bearingSide,
+                                directionality = directionality,
+                                speedLimitKph = speedKph,
+                                zoneLengthMeters = zoneLen,
+                                source = "SEED",
                                 createdAt = Instant.now(),
                             )
                         } catch (e: Exception) {
@@ -45,8 +62,14 @@ class SeedRepository(private val context: Context) {
             }
             SeedLoadResult(loaded = true, count = hazards.size) to hazards
         } catch (e: Exception) {
-            Log.e(tag, "Failed to load seeds.csv", e)
-            SeedLoadResult(loaded = false, count = 0) to emptyList()
+            return if (e is FileNotFoundException) {
+                // Treat missing seeds.csv as a valid empty seed set
+                Log.i(tag, "No seeds.csv found; starting with zero seeds")
+                SeedLoadResult(loaded = true, count = 0) to emptyList()
+            } else {
+                Log.e(tag, "Failed to load seeds.csv", e)
+                SeedLoadResult(loaded = false, count = 0) to emptyList()
+            }
         }
     }
 
