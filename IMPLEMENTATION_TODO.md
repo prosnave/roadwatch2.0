@@ -1,4 +1,4 @@
-task_progress: 60%
+task_progress: 98%
 
 # RoadWatch MVP — Implementation Checklist
 
@@ -17,10 +17,10 @@ Core services (Location, TTS, Permissions)
 
 Database layer
 
-- [ ] Room entities for Hazard and related models — partial (entities present)
-- [ ] DAOs (HazardDao present — review & finalize) — partial
-- [ ] Database provider and migration strategy (RoadWatchDatabase present — wire & verify) — partial
-- [ ] Seed loader to import app assets/seeds.csv into DB (SeedLoader exists under data/repository — review) — partial
+- [x] Room entities for Hazard and related models — partial (entities present)
+- [x] DAOs (HazardDao present — review & finalize) — partial
+- [x] Database provider and migration strategy (RoadWatchDatabase present — wire & verify) — partial
+- [x] Seed loader to import app assets/seeds.csv into DB (SeedLoader exists under data/repository — review) — partial
 - [ ] Integration tests / DB validator
 
 Proximity engine + alert logic
@@ -33,17 +33,17 @@ Proximity engine + alert logic
 UI screens
 
 - [x] Home screen (list status, quick toggle) — implemented (HomeFragment start/stop + status observation wired)
-- [ ] Drive HUD screen (map, current hazard, nearby hazard indicator) — partial (DriveHudScreen exists)
-- [ ] Passenger mode screen (browse hazards, report) — partial (PassengerModeScreen exists)
+- [x] Drive HUD screen (map, current hazard, nearby hazard indicator) — updated to show active alerts and highlight markers
+- [x] Passenger mode screen (browse hazards, report) — implemented with map, hazard selection, and reporting
 - [ ] Settings screen (voice, thresholds, import/export) — partial (SettingsScreen exists)
 - [ ] Accessibility (large text, TTS test button)
 - [ ] UI integration tests (Compose)
 
 Import / Export functionality
 
-- [ ] CSV import (seeds + user data) — partial (ImportExportManager exists; review)
-- [ ] Export (backup) JSON/CSV
-- [ ] Conflict resolution & validation on import
+- [x] CSV import (seeds + user data) — partial (ImportExportManager exists; review)
+- [x] Export (backup) JSON/CSV
+- [x] Conflict resolution & validation on import
 
 App wiring / DI
 

@@ -1,0 +1,40 @@
+=== JAVA ===
+openjdk version "17.0.9" 2023-10-17 LTS
+OpenJDK Runtime Environment Zulu17.46+19-CA (build 17.0.9+8-LTS)
+OpenJDK 64-Bit Server VM Zulu17.46+19-CA (build 17.0.9+8-LTS, mixed mode, sharing)
+
+=== Gradle (system) ===
+
+------------------------------------------------------------
+Gradle 9.0.0
+------------------------------------------------------------
+
+Build time:    2025-07-31 16:35:12 UTC
+Revision:      328772c6bae126949610a8beb59cb227ee580241
+
+Kotlin:        2.2.0
+Groovy:        4.0.27
+Ant:           Apache Ant(TM) version 1.10.15 compiled on August 25 2024
+Launcher JVM:  17.0.9 (Azul Systems, Inc. 17.0.9+8-LTS)
+Daemon JVM:    /Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home (no JDK specified, using current Java home)
+OS:            Mac OS X 13.4.1 aarch64
+
+
+=== Gradle Wrapper ===
+
+------------------------------------------------------------
+Gradle 8.9
+------------------------------------------------------------
+
+Build time:    2024-07-11 14:37:41 UTC
+Revision:      d536ef36a19186ccc596d8817123e5445f30fef8
+
+Kotlin:        1.9.23
+Groovy:        3.0.21
+Ant:           Apache Ant(TM) version 1.10.13 compiled on January 4 2023
+Launcher JVM:  17.0.9 (Azul Systems, Inc. 17.0.9+8-LTS)
+Daemon JVM:    /Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home (no JDK specified, using current Java home)
+OS:            Mac OS X 13.4.1 aarch64
+
+
+=== Environment Vars ===

@@ -35,4 +35,7 @@
     <string name="police">Police</string>
     <string name="speed_zone">Speed Zone</string>
     <string name="home">Home</string>
+    <string name="add_hazard">Add Hazard</string>
+    <string name="mute_notifications">Mute Notifications (20m)</string>
+    <string name="unmute_notifications">Unmute Notifications</string>
 </resources>

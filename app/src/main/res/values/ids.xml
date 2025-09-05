@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Placeholder IDs to satisfy references in MainActivity -->
+    <item name="toolbar" type="id"/>
+    <item name="bottom_nav" type="id"/>
+</resources>
+

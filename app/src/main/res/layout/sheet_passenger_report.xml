@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content">
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Passenger Report"
+            android:textStyle="bold"
+            android:paddingBottom="8dp" />
+
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Hazard type" />
+        <Spinner android:id="@+id/spn_type" android:layout_width="match_parent" android:layout_height="wrap_content" />
+
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Lane side" android:paddingTop="8dp" />
+        <Spinner android:id="@+id/spn_lane" android:layout_width="match_parent" android:layout_height="wrap_content" />
+
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Notes (optional)" android:paddingTop="8dp" />
+        <EditText android:id="@+id/edt_notes" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="48dp" android:hint="Describe details" />
+
+        <!-- Speed limit zone extras -->
+        <LinearLayout android:id="@+id/zone_block" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingTop="8dp" android:visibility="gone">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Speed limit (kph)"/>
+            <EditText android:id="@+id/edt_speed_kph" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="number" />
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:paddingTop="6dp">
+                <Button android:id="@+id/btn_set_start" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Set Start (current)"/>
+                <Space android:layout_width="8dp" android:layout_height="1dp"/>
+                <Button android:id="@+id/btn_set_end" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Set End (current)"/>
+            </LinearLayout>
+            <TextView android:id="@+id/txt_zone_status" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Start: —   End: —" android:paddingTop="4dp"/>
+        </LinearLayout>
+
+        <Button android:id="@+id/btn_submit" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:text="Submit" />
+
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Photo (optional): Not captured in this build" android:textColor="#666" android:paddingTop="8dp" />
+    </LinearLayout>
+</ScrollView>
