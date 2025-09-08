@@ -30,11 +30,9 @@ object UiAlerts {
             val ctx = attach.context
             sb.setBackgroundTint(ContextCompat.getColor(ctx, colorRes))
             sb.setTextColor(Color.WHITE)
-            // Try to anchor above bottom bar/report button when present
-            val activity = (ctx as? android.app.Activity)
-            val bottomBar = activity?.findViewById<View>(com.roadwatch.app.R.id.bottom_bar)
-                ?: activity?.findViewById<View>(com.roadwatch.app.R.id.btn_quick_report)
-            if (bottomBar != null) sb.setAnchorView(bottomBar)
+            if (anchor != null) {
+                sb.setAnchorView(anchor)
+            }
         } catch (_: Exception) {}
         sb.show()
     }

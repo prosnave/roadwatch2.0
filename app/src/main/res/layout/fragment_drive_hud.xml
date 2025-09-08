@@ -1,217 +1,77 @@
 <?xml version="1.0" encoding="utf-8"?>
 <androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    xmlns:app="http://schemas.android.com/apk/res-auto" android:layout_width="match_parent" android:layout_height="match_parent">
 
-    <FrameLayout
-        android:id="@+id/map_container"
-        android:layout_width="0dp"
-        android:layout_height="0dp"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent" />
+    <FrameLayout android:id="@+id/map_container" android:layout_width="0dp" android:layout_height="0dp" app:layout_constraintTop_toTopOf="parent" app:layout_constraintBottom_toBottomOf="parent" app:layout_constraintStart_toStartOf="parent" app:layout_constraintEnd_toEndOf="parent" />
 
-    <com.google.android.material.card.MaterialCardView
-        android:id="@+id/bottom_bar"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_margin="16dp"
-        app:cardElevation="8dp"
-        app:cardCornerRadius="16dp"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent">
+    <com.google.android.material.card.MaterialCardView android:id="@+id/bottom_bar" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_margin="16dp" app:cardElevation="8dp" app:cardCornerRadius="16dp" app:layout_constraintBottom_toBottomOf="parent" app:layout_constraintStart_toStartOf="parent" app:layout_constraintEnd_toEndOf="parent">
 
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:padding="12dp"
-            android:gravity="center">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:padding="12dp" android:gravity="center">
 
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btn_stop"
-                style="?attr/materialButtonOutlinedStyle"
-                android:layout_width="wrap_content"
-                android:layout_height="40dp"
-                android:textSize="14sp"
-                android:text="@string/stop_drive_mode"
-                app:icon="@drawable/ic_stop"
-                app:iconPadding="6dp"/>
+            <com.google.android.material.button.MaterialButton android:id="@+id/btn_stop" style="?attr/materialButtonOutlinedStyle" android:layout_width="wrap_content" android:layout_height="40dp" android:textSize="14sp" android:text="@string/stop_drive_mode" app:icon="@drawable/ic_stop" app:iconPadding="6dp"/>
 
-            
+
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 
-    <!-- Big quick report button centered above bottom bar -->
-    <com.google.android.material.button.MaterialButton
-        android:id="@+id/btn_quick_report"
-        style="?attr/materialButtonStyle"
-        android:layout_width="0dp"
-        android:layout_height="56dp"
-        android:textSize="18sp"
-        android:text="Report hazard"
-        app:icon="@drawable/ic_add"
-        app:iconPadding="10dp"
-        app:layout_constraintBottom_toTopOf="@id/bottom_bar"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        android:layout_marginStart="16dp"
-        android:layout_marginEnd="16dp"
-        android:layout_marginBottom="16dp"/>
+    <!-- Hazard reporting UI -->
+    <LinearLayout android:id="@+id/hazard_buttons_container" android:layout_width="0dp" android:layout_height="wrap_content" android:orientation="vertical" android:visibility="visible" app:layout_constraintBottom_toTopOf="@id/bottom_bar" app:layout_constraintStart_toStartOf="parent" app:layout_constraintEnd_toEndOf="parent" android:layout_marginStart="16dp" android:layout_marginEnd="16dp" android:layout_marginBottom="16dp">
 
-    
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+
+            <com.google.android.material.button.MaterialButton android:id="@+id/btn_report_bump" style="?attr/materialButtonStyle" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="BUMP" android:textSize="18sp" app:icon="@drawable/ic_hazard_bump" app:iconPadding="10dp" android:backgroundTint="#FF5722" android:layout_marginEnd="8dp"/>
+
+            <com.google.android.material.button.MaterialButton android:id="@+id/btn_report_pothole" style="?attr/materialButtonStyle" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="POTHOLE" android:textSize="18sp" app:icon="@drawable/ic_hazard_pothole" app:iconPadding="10dp" android:backgroundTint="#FFC107"/>
+        </LinearLayout>
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginTop="8dp">
+
+            <com.google.android.material.button.MaterialButton android:id="@+id/btn_report_rumble" style="?attr/materialButtonStyle" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="RUMBLE" android:textSize="18sp" app:icon="@drawable/ic_hazard_rumble_strip" app:iconPadding="10dp" android:backgroundTint="#4CAF50" android:layout_marginEnd="8dp"/>
+
+            <com.google.android.material.button.MaterialButton android:id="@+id/btn_report_zone" style="?attr/materialButtonStyle" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="ZONE" android:textSize="18sp" app:icon="@drawable/ic_add" app:iconPadding="10dp" android:backgroundTint="#2196F3"/>
+        </LinearLayout>
+    </LinearLayout>
+
     <!-- Muted chip (appears only when muted) -->
-    <com.google.android.material.card.MaterialCardView
-        android:id="@+id/mute_chip"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_margin="12dp"
-        app:cardCornerRadius="12dp"
-        app:cardElevation="6dp"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        android:visibility="gone">
+    <com.google.android.material.card.MaterialCardView android:id="@+id/mute_chip" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_margin="12dp" app:cardCornerRadius="12dp" app:cardElevation="6dp" app:layout_constraintTop_toTopOf="parent" app:layout_constraintStart_toStartOf="parent" android:visibility="gone">
 
-        <LinearLayout
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:padding="6dp">
-            <ImageView
-                android:layout_width="18dp"
-                android:layout_height="18dp"
-                android:src="@drawable/ic_volume_off" />
-            <TextView
-                android:id="@+id/txt_muted_until"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Muted until 00:00"
-                android:paddingLeft="8dp" />
+        <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:orientation="horizontal" android:padding="6dp">
+            <ImageView android:layout_width="18dp" android:layout_height="18dp" android:src="@drawable/ic_volume_off" />
+            <TextView android:id="@+id/txt_muted_until" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Muted until 00:00" android:paddingLeft="8dp" />
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 
     <!-- Speed + Direction card -->
-    <com.google.android.material.card.MaterialCardView
-        android:id="@+id/speed_card"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_margin="16dp"
-        app:cardCornerRadius="18dp"
-        app:cardElevation="8dp"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent">
+    <com.google.android.material.card.MaterialCardView android:id="@+id/speed_card" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_margin="16dp" app:cardCornerRadius="18dp" app:cardElevation="8dp" app:layout_constraintTop_toTopOf="parent" app:layout_constraintStart_toStartOf="parent" app:layout_constraintEnd_toEndOf="parent">
 
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:padding="16dp"
-            android:gravity="center">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:padding="16dp" android:gravity="center">
 
-            <LinearLayout
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:orientation="vertical"
-                android:gravity="center">
-                <TextView
-                    android:id="@+id/txt_speed_value"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="0"
-                    android:textStyle="bold"
-                    android:textSize="40sp"/>
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="km/h"/>
+            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical" android:gravity="center">
+                <TextView android:id="@+id/txt_speed_value" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="0" android:textStyle="bold" android:textSize="40sp"/>
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="km/h"/>
             </LinearLayout>
 
-            <LinearLayout
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:orientation="vertical"
-                android:gravity="center">
-                <TextView
-                    android:id="@+id/txt_bearing_value"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="N"
-                    android:textStyle="bold"
-                    android:textSize="40sp"/>
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Direction"/>
+            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical" android:gravity="center">
+                <TextView android:id="@+id/txt_bearing_value" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="N" android:textStyle="bold" android:textSize="40sp"/>
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Direction"/>
             </LinearLayout>
         </LinearLayout>
 
-        <TextView
-            android:id="@+id/txt_next_subtitle"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text=""
-            android:paddingLeft="16dp"
-            android:paddingRight="16dp"
-            android:paddingBottom="12dp"
-            android:textColor="@color/on_surface_variant"/>
+        <TextView android:id="@+id/txt_next_subtitle" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="" android:paddingLeft="16dp" android:paddingRight="16dp" android:paddingBottom="12dp" android:textColor="@color/on_surface_variant"/>
     </com.google.android.material.card.MaterialCardView>
 
     <!-- Next hazard chip -->
-    <com.google.android.material.card.MaterialCardView
-        android:id="@+id/next_chip"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_margin="12dp"
-        app:cardCornerRadius="12dp"
-        app:cardElevation="6dp"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintEnd_toEndOf="parent">
+    <com.google.android.material.card.MaterialCardView android:id="@+id/next_chip" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_margin="12dp" app:cardCornerRadius="12dp" app:cardElevation="6dp" app:layout_constraintTop_toTopOf="parent" app:layout_constraintEnd_toEndOf="parent">
 
-        <LinearLayout
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:padding="6dp">
-            <ImageView
-                android:layout_width="18dp"
-                android:layout_height="18dp"
-                android:src="@drawable/ic_hazard" />
-            <TextView
-                android:id="@+id/txt_next_hazard"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text=""
-                android:paddingLeft="8dp" />
+        <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:orientation="horizontal" android:padding="6dp">
+            <ImageView android:layout_width="18dp" android:layout_height="18dp" android:src="@drawable/ic_hazard" />
+            <TextView android:id="@+id/txt_next_hazard" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="" android:paddingLeft="8dp" />
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
-    
+
     <!-- Large in-app hazard overlay (shown briefly on alerts) -->
-    <com.google.android.material.card.MaterialCardView
-        android:id="@+id/alert_overlay"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_margin="16dp"
-        android:visibility="gone"
-        app:cardCornerRadius="16dp"
-        app:cardElevation="10dp"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent">
-        <TextView
-            android:id="@+id/alert_text"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:padding="18dp"
-            android:textSize="20sp"
-            android:textStyle="bold"
-            android:textColor="@android:color/black"
-            android:text=""/>
+    <com.google.android.material.card.MaterialCardView android:id="@+id/alert_overlay" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_margin="16dp" android:visibility="gone" app:cardCornerRadius="16dp" app:cardElevation="10dp" app:layout_constraintTop_toTopOf="parent" app:layout_constraintStart_toStartOf="parent" app:layout_constraintEnd_toEndOf="parent">
+        <TextView android:id="@+id/alert_text" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="18dp" android:textSize="20sp" android:textStyle="bold" android:textColor="@android:color/black" android:text=""/>
     </com.google.android.material.card.MaterialCardView>
 
 </androidx.constraintlayout.widget.ConstraintLayout>

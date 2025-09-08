@@ -34,6 +34,8 @@ class AdminLocationsFragment : Fragment() {
             val active: Boolean,
             val votes: Int,
             val directionality: String,
+            val userBearing: Float?,
+            val roadBearing: Float?,
         )
 
         fun refresh() {
@@ -48,7 +50,7 @@ class AdminLocationsFragment : Fragment() {
                 val votes = CommunityVotes.getVotes(requireContext(), key)
                 val createdAt = try { h.createdAt.toString() } catch (_: Exception) { "" }
                 rows += Row(
-                    label = buildLabel(h.type.name, active, votes, createdAt, h.directionality),
+                    label = buildLabel(h.type.name, active, votes, createdAt, h.directionality, h.reportedHeadingDeg, h.userBearing, h.roadBearing),
                     isUser = false,
                     userId = null,
                     seedKey = key,
@@ -56,6 +58,8 @@ class AdminLocationsFragment : Fragment() {
                     active = active,
                     votes = votes,
                     directionality = h.directionality,
+                    userBearing = h.userBearing,
+                    roadBearing = h.roadBearing,
                 )
             }
             userHazards.forEach { u ->
@@ -63,7 +67,7 @@ class AdminLocationsFragment : Fragment() {
                 val votes = CommunityVotes.getVotes(requireContext(), voteKey)
                 val createdAt = try { u.hazard.createdAt.toString() } catch (_: Exception) { "" }
                 rows += Row(
-                    label = buildLabel(u.hazard.type.name, u.hazard.active, votes, createdAt, u.hazard.directionality),
+                    label = buildLabel(u.hazard.type.name, u.hazard.active, votes, createdAt, u.hazard.directionality, u.hazard.reportedHeadingDeg, u.hazard.userBearing, u.hazard.roadBearing),
                     isUser = true,
                     userId = u.id,
                     seedKey = null,
@@ -71,6 +75,8 @@ class AdminLocationsFragment : Fragment() {
                     active = u.hazard.active,
                     votes = votes,
                     directionality = u.hazard.directionality,
+                    userBearing = u.hazard.userBearing,
+                    roadBearing = u.hazard.roadBearing,
                 )
             }
             // Summary and list rendering
@@ -182,7 +188,7 @@ class AdminLocationsFragment : Fragment() {
         refresh()
     }
 
-    private fun buildLabel(type: String, active: Boolean, votes: Int, created: String, directionality: String): String {
+    private fun buildLabel(type: String, active: Boolean, votes: Int, created: String, directionality: String, heading: Float?, userBearing: Float?, roadBearing: Float?): String {
         val instant = try { java.time.Instant.parse(created) } catch (_: Exception) { java.time.Instant.EPOCH }
         val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(ZoneId.systemDefault())
         val formattedDate = formatter.format(instant)
@@ -191,10 +197,14 @@ class AdminLocationsFragment : Fragment() {
         val niceDir = when (directionality.uppercase()) {
             "ONE_WAY" -> "One-way"
             "BIDIRECTIONAL" -> "Two-way"
+            "OPPOSITE" -> "Opposite"
             else -> "Unknown"
         }
+        val hdg = heading?.let { "${it.toInt()}°" } ?: "—"
+        val userBrg = userBearing?.let { "${it.toInt()}°" } ?: "—"
+        val roadBrg = roadBearing?.let { "${it.toInt()}°" } ?: "—"
         val top = "$niceType • $status • votes: $votes"
-        val bottom = "Road: $niceDir • $formattedDate"
+        val bottom = "Direction: $niceDir • User Bearing: $userBrg • Road Bearing: $roadBrg • Heading: $hdg • $formattedDate"
         return "$top\n$bottom"
     }
 }

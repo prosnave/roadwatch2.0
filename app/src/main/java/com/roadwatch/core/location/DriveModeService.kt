@@ -47,10 +47,14 @@ class DriveModeService : Service(), LocationListener {
     }
 
     override fun onLocationChanged(location: Location) {
+        lastKnownLocation = location
         alerts?.onLocationUpdate(location)
     }
 
     companion object {
+        var lastKnownLocation: Location? = null
+            private set
+
         private const val TAG = "DriveModeService"
         private const val ACTION_START = "com.roadwatch.core.location.action.START"
         private const val ACTION_STOP = "com.roadwatch.core.location.action.STOP"

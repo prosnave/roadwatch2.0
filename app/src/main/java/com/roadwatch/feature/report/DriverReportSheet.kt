@@ -12,6 +12,7 @@ import android.widget.Button
 import android.widget.Toast
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 import com.roadwatch.app.R
+import com.roadwatch.core.location.DriveModeService
 import com.roadwatch.data.Hazard
 import com.roadwatch.data.HazardType
 import com.roadwatch.data.SeedRepository
@@ -19,13 +20,28 @@ import java.time.Instant
 import kotlin.math.*
 
 class DriverReportSheet : BottomSheetDialogFragment() {
+
+    companion object {
+        private const val ARG_HAZARD_TYPE = "hazard_type"
+
+        fun newInstance(hazardType: HazardType? = null): DriverReportSheet {
+            val fragment = DriverReportSheet()
+            val args = Bundle()
+            hazardType?.let { args.putString(ARG_HAZARD_TYPE, it.name) }
+            fragment.arguments = args
+            return fragment
+        }
+    }
+
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? {
         return inflater.inflate(R.layout.sheet_driver_report, container, false)
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-        val toggleDir = view.findViewById<com.google.android.material.button.MaterialButtonToggleGroup>(R.id.toggle_direction)
+        val hazardTypeName = arguments?.getString(ARG_HAZARD_TYPE)
+        val hazardType = hazardTypeName?.let { HazardType.valueOf(it) }
+
         // Large hazard type buttons
         val btnBump = view.findViewById<Button>(R.id.btn_type_bump)
         val btnPothole = view.findViewById<Button>(R.id.btn_type_pothole)
@@ -41,8 +57,15 @@ class DriverReportSheet : BottomSheetDialogFragment() {
         val typeContainer = view.findViewById<android.widget.LinearLayout>(R.id.type_buttons_container)
 
         // Show large type buttons for all users (no separate quick report)
-        typeHeader.visibility = View.VISIBLE
-        typeContainer.visibility = View.VISIBLE
+        if (hazardType == HazardType.SPEED_LIMIT_ZONE) {
+            typeHeader.visibility = View.GONE
+            typeContainer.visibility = View.GONE
+            zoneBlock.visibility = View.VISIBLE
+        } else {
+            typeHeader.visibility = View.VISIBLE
+            typeContainer.visibility = View.VISIBLE
+            zoneBlock.visibility = View.GONE
+        }
 
         var zoneStart: android.location.Location? = null
         var zoneEnd: android.location.Location? = null
@@ -61,22 +84,33 @@ class DriverReportSheet : BottomSheetDialogFragment() {
         }
 
         fun report(selected: HazardType) {
-            val loc = lastKnown() ?: run {
+            val loc = DriveModeService.lastKnownLocation
+            if (loc == null) {
                 com.roadwatch.ui.UiAlerts.error(view, "Location unavailable")
                 return
             }
-            val repo = SeedRepository(requireContext())
-            // Default: most spot hazards affect only your carriageway (ONE_WAY); zones usually both directions.
-            fun defaultDirectionality(t: HazardType): String = when (t) {
-                HazardType.SPEED_LIMIT_ZONE -> "BIDIRECTIONAL"
-                else -> "ONE_WAY"
+
+            val userBearing = if (loc.hasBearing()) loc.bearing else 0.0f
+            val roadBearing = getRoadBearing(loc.latitude, loc.longitude) // Placeholder
+            val bearingDifference = (userBearing - roadBearing + 360) % 360
+            val directionality = if (selected == HazardType.SPEED_LIMIT_ZONE) {
+                "BIDIRECTIONAL"
+            } else if (bearingDifference <= 30 || bearingDifference >= 330) {
+                "ONE_WAY"
+            } else {
+                "OPPOSITE"
             }
+
+            val repo = SeedRepository(requireContext())
             val result = repo.addUserHazardWithDedup(
                 Hazard(
                     type = selected,
                     lat = loc.latitude,
                     lng = loc.longitude,
-                    directionality = if (toggleDir?.checkedButtonId == R.id.btn_two_way) "BIDIRECTIONAL" else "ONE_WAY",
+                    reportedHeadingDeg = userBearing,
+                    directionality = directionality,
+                    userBearing = userBearing,
+                    roadBearing = roadBearing,
                     active = true,
                     source = "USER",
                     createdAt = Instant.now()
@@ -89,8 +123,18 @@ class DriverReportSheet : BottomSheetDialogFragment() {
                         try { com.roadwatch.core.util.Haptics.tap(requireContext()) } catch (_: Exception) {}
                     }
                     try {
-                        val intent = android.content.Intent("com.roadwatch.REFRESH_HAZARDS")
-                        requireContext().sendBroadcast(intent)
+                        val refreshIntent = android.content.Intent("com.roadwatch.REFRESH_HAZARDS")
+                        requireContext().sendBroadcast(refreshIntent)
+
+                        val details = "Type: ${selected.name}\n" +
+                                "Location: (${loc.latitude}, ${loc.longitude})\n" +
+                                "User Bearing: $userBearing\n" +
+                                "Road Bearing: $roadBearing\n" +
+                                "Directionality: $directionality"
+                        val reportIntent = android.content.Intent("com.roadwatch.HAZARD_REPORTED").apply {
+                            putExtra("hazard_details", details)
+                        }
+                        requireContext().sendBroadcast(reportIntent)
                     } catch (_: Exception) {}
                     dismissAllowingStateLoss()
                 }
@@ -113,18 +157,26 @@ class DriverReportSheet : BottomSheetDialogFragment() {
             txtZStatus.text = "Start: ${zoneStart?.latitude?.let { String.format("%.5f", it) } ?: "—"}   End: ${zoneEnd?.latitude?.let { String.format("%.5f", it) } ?: "—"}"
         }
         btnZSubmit.setOnClickListener {
-            val loc = lastKnown()
+            val loc = DriveModeService.lastKnownLocation
             if (loc == null) { com.roadwatch.ui.UiAlerts.error(view, "Location unavailable"); return@setOnClickListener }
             val kph = edtSpeed.text.toString().toIntOrNull()
             if (zoneStart == null || zoneEnd == null) { com.roadwatch.ui.UiAlerts.info(view, "Set start and end of zone"); return@setOnClickListener }
             val len = distance(zoneStart!!, zoneEnd!!).toInt()
             if (len < 100) { com.roadwatch.ui.UiAlerts.info(view, "Zone too short (min 100m)"); return@setOnClickListener }
             val repo = SeedRepository(requireContext())
+            val userBearing = if (loc.hasBearing()) loc.bearing else 0.0f
+            val roadBearing = getRoadBearing(loc.latitude, loc.longitude) // Placeholder
+            val bearingDifference = (userBearing - roadBearing + 360) % 360
+            val directionality = "BIDIRECTIONAL"
+
             val h = Hazard(
                 type = HazardType.SPEED_LIMIT_ZONE,
                 lat = loc.latitude,
                 lng = loc.longitude,
-                directionality = if (toggleDir?.checkedButtonId == R.id.btn_two_way) "BIDIRECTIONAL" else "ONE_WAY",
+                reportedHeadingDeg = userBearing,
+                directionality = directionality,
+                userBearing = userBearing,
+                roadBearing = roadBearing,
                 active = true,
                 source = "USER",
                 createdAt = Instant.now(),
@@ -138,7 +190,20 @@ class DriverReportSheet : BottomSheetDialogFragment() {
             when (repo.addUserHazardWithDedup(h)) {
                 SeedRepository.AddResult.ADDED -> {
                     com.roadwatch.ui.UiAlerts.success(view, "Zone reported")
-                    try { requireContext().sendBroadcast(android.content.Intent("com.roadwatch.REFRESH_HAZARDS")) } catch (_: Exception) {}
+                    try {
+                        val refreshIntent = android.content.Intent("com.roadwatch.REFRESH_HAZARDS")
+                        requireContext().sendBroadcast(refreshIntent)
+
+                        val details = "Type: ${h.type.name}\n" +
+                                "Location: (${h.lat}, ${h.lng})\n" +
+                                "User Bearing: ${h.userBearing}\n" +
+                                "Road Bearing: ${h.roadBearing}\n" +
+                                "Directionality: ${h.directionality}"
+                        val reportIntent = android.content.Intent("com.roadwatch.HAZARD_REPORTED").apply {
+                            putExtra("hazard_details", details)
+                        }
+                        requireContext().sendBroadcast(reportIntent)
+                    } catch (_: Exception) {}
                     dismissAllowingStateLoss()
                 }
                 SeedRepository.AddResult.DUPLICATE_NEARBY -> com.roadwatch.ui.UiAlerts.warn(view, "Similar zone nearby")
@@ -157,19 +222,13 @@ class DriverReportSheet : BottomSheetDialogFragment() {
             try { dismissAllowingStateLoss() } catch (_: Exception) {}
         }
     }
+}
 
-    private fun lastKnown(): Location? {
-        val lm = requireContext().getSystemService(android.content.Context.LOCATION_SERVICE) as LocationManager
-        val hasFine = requireContext().checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        if (!hasFine) return null
-        val providers = lm.getProviders(true)
-        var best: Location? = null
-        for (p in providers) {
-            val l = lm.getLastKnownLocation(p) ?: continue
-            if (best == null || l.accuracy < best!!.accuracy) best = l
-        }
-        return best
-    }
+// Placeholder for road bearing service
+private fun getRoadBearing(lat: Double, lng: Double): Float {
+    // In a real app, this would call a mapping service API
+    // For now, we'll return a random bearing for simulation
+    return (0..360).random().toFloat()
 }
 
 private fun distance(a: android.location.Location, b: android.location.Location): Double {

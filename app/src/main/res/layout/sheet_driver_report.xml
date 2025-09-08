@@ -1,147 +1,47 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
-    android:layout_width="match_parent"
-    android:layout_height="wrap_content"
-    android:orientation="vertical"
-    android:padding="20dp">
+    xmlns:app="http://schemas.android.com/apk/res-auto" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="20dp">
 
     <!-- Title removed per request for less ambiguity -->
 
-    <!-- Road type first -->
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Road type"
-        android:paddingBottom="6dp"
-        android:textAppearance="@style/TextAppearance.Material3.TitleMedium"/>
-    <com.google.android.material.button.MaterialButtonToggleGroup
-        android:id="@+id/toggle_direction"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        app:singleSelection="true"
-        app:checkedButton="@id/btn_one_way">
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_one_way"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:minHeight="56dp"
-            android:textSize="16sp"
-            android:text="One-way"
-            android:checkable="true"
-            app:backgroundTint="@color/toggle_bg"
-            android:textColor="@color/toggle_text"
-            app:strokeWidth="1dp"
-            app:strokeColor="@color/toggle_stroke"
-            app:cornerRadius="24dp"/>
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_two_way"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:minHeight="56dp"
-            android:textSize="16sp"
-            android:text="Two-way"
-            android:checkable="true"
-            app:backgroundTint="@color/toggle_bg"
-            android:textColor="@color/toggle_text"
-            app:strokeWidth="1dp"
-            app:strokeColor="@color/toggle_stroke"
-            app:cornerRadius="24dp"/>
-    </com.google.android.material.button.MaterialButtonToggleGroup>
+    <TextView android:id="@+id/txt_choose_type" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Select hazard type" android:textAppearance="@style/TextAppearance.Material3.TitleMedium" android:paddingTop="16dp"/>
 
-    <TextView
-        android:id="@+id/txt_choose_type"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Select hazard type"
-        android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-        android:paddingTop="16dp"/>
+    <LinearLayout android:id="@+id/type_buttons_container" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingTop="8dp">
 
-    <LinearLayout
-        android:id="@+id/type_buttons_container"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:paddingTop="8dp">
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_type_bump"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:minHeight="72dp"
-            android:textSize="18sp"
-            android:text="Speed bump"
-            style="?attr/materialButtonOutlinedStyle"
-            app:icon="@drawable/ic_marker_bump"
-            app:iconGravity="textStart"
-            app:iconPadding="12dp"/>
+        <com.google.android.material.button.MaterialButton android:id="@+id/btn_type_bump" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="72dp" android:textSize="18sp" android:text="Speed bump" style="?attr/materialButtonOutlinedStyle" app:icon="@drawable/ic_marker_bump" app:iconGravity="textStart" app:iconPadding="12dp"/>
 
         <Space android:layout_width="match_parent" android:layout_height="8dp"/>
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_type_pothole"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:minHeight="72dp"
-            android:textSize="18sp"
-            android:text="Pothole"
-            style="?attr/materialButtonOutlinedStyle"
-            app:icon="@drawable/ic_marker_pothole"
-            app:iconGravity="textStart"
-            app:iconPadding="12dp"/>
+        <com.google.android.material.button.MaterialButton android:id="@+id/btn_type_pothole" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="72dp" android:textSize="18sp" android:text="Pothole" style="?attr/materialButtonOutlinedStyle" app:icon="@drawable/ic_marker_pothole" app:iconGravity="textStart" app:iconPadding="12dp"/>
 
         <Space android:layout_width="match_parent" android:layout_height="8dp"/>
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_type_rumble"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:minHeight="72dp"
-            android:textSize="18sp"
-            android:text="Rumble strip"
-            style="?attr/materialButtonOutlinedStyle"
-            app:icon="@drawable/ic_marker_rumble"
-            app:iconGravity="textStart"
-            app:iconPadding="12dp"/>
+        <com.google.android.material.button.MaterialButton android:id="@+id/btn_type_rumble" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="72dp" android:textSize="18sp" android:text="Rumble strip" style="?attr/materialButtonOutlinedStyle" app:icon="@drawable/ic_marker_rumble" app:iconGravity="textStart" app:iconPadding="12dp"/>
 
         <Space android:layout_width="match_parent" android:layout_height="8dp"/>
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_type_zone"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:minHeight="72dp"
-            android:textSize="18sp"
-            android:text="Speed limit zone"
-            style="?attr/materialButtonOutlinedStyle"
-            app:iconGravity="textStart"
-            app:iconPadding="12dp"/>
+        <com.google.android.material.button.MaterialButton android:id="@+id/btn_type_zone" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="72dp" android:textSize="18sp" android:text="Speed limit zone" style="?attr/materialButtonOutlinedStyle" app:iconGravity="textStart" app:iconPadding="12dp"/>
     </LinearLayout>
 
     <!-- Speed limit zone details (visible when selected) -->
-    <LinearLayout
-        android:id="@+id/zone_block_driver"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:visibility="gone"
-        android:paddingTop="8dp">
-        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Speed limit (kph)"/>
-        <EditText android:id="@+id/edt_speed_kph_driver" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="number" />
-        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:paddingTop="6dp">
-            <Button android:id="@+id/btn_zone_start_driver" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Set Start (current)"/>
-            <Space android:layout_width="8dp" android:layout_height="1dp"/>
-            <Button android:id="@+id/btn_zone_end_driver" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Set End (current)"/>
+    <LinearLayout android:id="@+id/zone_block_driver" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone" android:paddingTop="16dp">
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Speed Limit (kph)" android:textAppearance="@style/TextAppearance.Material3.TitleMedium"/>
+
+        <com.google.android.material.textfield.TextInputEditText android:id="@+id/edt_speed_kph_driver" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="number" android:textSize="24sp" android:padding="16dp"/>
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:paddingTop="16dp">
+
+            <com.google.android.material.button.MaterialButton android:id="@+id/btn_zone_start_driver" style="?attr/materialButtonOutlinedStyle" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Set Start" android:minHeight="64dp"/>
+
+            <Space android:layout_width="16dp" android:layout_height="1dp"/>
+
+            <com.google.android.material.button.MaterialButton android:id="@+id/btn_zone_end_driver" style="?attr/materialButtonOutlinedStyle" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Set End" android:minHeight="64dp"/>
         </LinearLayout>
-        <TextView android:id="@+id/txt_zone_status_driver" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Start: —   End: —" android:paddingTop="4dp"/>
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_zone_submit_driver"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:text="Submit zone"/>
+
+        <TextView android:id="@+id/txt_zone_status_driver" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Start: —   End: —" android:paddingTop="8dp" android:textAppearance="@style/TextAppearance.Material3.BodyLarge"/>
+
+        <com.google.android.material.button.MaterialButton android:id="@+id/btn_zone_submit_driver" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="24dp" android:text="Submit Zone" android:minHeight="72dp" android:textSize="18sp"/>
     </LinearLayout>
 
     <!-- divider below selections removed to reduce clutter -->

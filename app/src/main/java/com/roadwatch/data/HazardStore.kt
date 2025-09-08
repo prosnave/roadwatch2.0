@@ -13,7 +13,7 @@ class HazardStore(private val context: Context) {
     init {
         if (!file.exists()) {
             file.parentFile?.mkdirs()
-            file.writeText("id,type,lat,lng,active,directionality,source,createdAt,speedLimitKph,zoneLengthMeters,zoneStartLat,zoneStartLng,zoneEndLat,zoneEndLng\n")
+            file.writeText("id,type,lat,lng,active,directionality,reportedHeadingDeg,source,createdAt,speedLimitKph,zoneLengthMeters,zoneStartLat,zoneStartLng,zoneEndLat,zoneEndLng\n")
         }
     }
 
@@ -28,6 +28,7 @@ class HazardStore(private val context: Context) {
                 h.lng.toString(),
                 h.active.toString(),
                 h.directionality,
+                h.reportedHeadingDeg.toString(),
                 h.source,
                 createdAt,
                 h.speedLimitKph?.toString().orEmpty(),
@@ -51,7 +52,7 @@ class HazardStore(private val context: Context) {
         file.forEachLine { raw ->
             if (raw.startsWith("id,")) return@forEachLine
             val parts = raw.split(',')
-            if (parts.size < 8) return@forEachLine
+            if (parts.size < 9) return@forEachLine
             try {
                 result += UserHazard(
                     id = parts[0],
@@ -61,14 +62,15 @@ class HazardStore(private val context: Context) {
                         lng = parts[3].toDouble(),
                         active = parts[4].toBooleanStrictOrNull() ?: true,
                         directionality = parts[5],
-                        source = parts[6],
-                        createdAt = Instant.parse(parts[7]),
-                        speedLimitKph = parts.getOrNull(8)?.toIntOrNull(),
-                        zoneLengthMeters = parts.getOrNull(9)?.toIntOrNull(),
-                        zoneStartLat = parts.getOrNull(10)?.toDoubleOrNull(),
-                        zoneStartLng = parts.getOrNull(11)?.toDoubleOrNull(),
-                        zoneEndLat = parts.getOrNull(12)?.toDoubleOrNull(),
-                        zoneEndLng = parts.getOrNull(13)?.toDoubleOrNull(),
+                        reportedHeadingDeg = parts.getOrNull(6)?.toFloatOrNull() ?: 0.0f,
+                        source = parts[7],
+                        createdAt = Instant.parse(parts[8]),
+                        speedLimitKph = parts.getOrNull(9)?.toIntOrNull(),
+                        zoneLengthMeters = parts.getOrNull(10)?.toIntOrNull(),
+                        zoneStartLat = parts.getOrNull(11)?.toDoubleOrNull(),
+                        zoneStartLng = parts.getOrNull(12)?.toDoubleOrNull(),
+                        zoneEndLat = parts.getOrNull(13)?.toDoubleOrNull(),
+                        zoneEndLng = parts.getOrNull(14)?.toDoubleOrNull(),
                     )
                 )
             } catch (_: Exception) {
@@ -104,7 +106,7 @@ class HazardStore(private val context: Context) {
 
     private fun writeAll(items: List<UserHazard>): Boolean {
         return try {
-            file.writeText("id,type,lat,lng,active,directionality,source,createdAt,speedLimitKph,zoneLengthMeters,zoneStartLat,zoneStartLng,zoneEndLat,zoneEndLng\n")
+            file.writeText("id,type,lat,lng,active,directionality,reportedHeadingDeg,source,createdAt,speedLimitKph,zoneLengthMeters,zoneStartLat,zoneStartLng,zoneEndLat,zoneEndLng\n")
             items.forEach { u ->
                 val h = u.hazard
                 val createdAt = DateTimeFormatter.ISO_INSTANT.format(h.createdAt)
@@ -115,6 +117,7 @@ class HazardStore(private val context: Context) {
                     h.lng.toString(),
                     h.active.toString(),
                     h.directionality,
+                    h.reportedHeadingDeg.toString(),
                     h.source,
                     createdAt,
                     h.speedLimitKph?.toString().orEmpty(),

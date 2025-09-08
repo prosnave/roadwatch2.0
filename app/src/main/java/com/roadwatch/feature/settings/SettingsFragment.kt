@@ -242,6 +242,7 @@ class SettingsFragment : Fragment() {
                                     lng = lng,
                                     active = active,
                                     directionality = directionality,
+                                    reportedHeadingDeg = 0.0f,
                                     speedLimitKph = speedKph,
                                     zoneLengthMeters = zoneLen,
                                     zoneStartLat = zoneStartLat,

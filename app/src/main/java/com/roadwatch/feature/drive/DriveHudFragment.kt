@@ -50,7 +50,7 @@ class DriveHudFragment : Fragment() {
     private var lastBaselineTime: Long = 0L
     private var lastMoveTime: Long = 0L
     private val idleDistanceMeters = 100.0
-    private val idleTimeoutMs = 60_000L
+    private val idleTimeoutMs = 120_000L
     private var providersReceiver: BroadcastReceiver? = null
     private var overlayReceiver: BroadcastReceiver? = null
     private val locListener = object : LocationListener {
@@ -60,20 +60,13 @@ class DriveHudFragment : Fragment() {
             updateHudFrom(location)
             updateNextHazardChip(location)
             evaluateIdleStop(location)
-            if (firstFix) {
-                firstFix = false
-                googleMap?.animateCamera(
-                    CameraUpdateFactory.newLatLngZoom(
-                        LatLng(location.latitude, location.longitude), 17f
-                    )
-                )
-            } else {
-                googleMap?.animateCamera(
-                    CameraUpdateFactory.newLatLng(
-                        LatLng(location.latitude, location.longitude)
-                    )
-                )
-            }
+            val cameraPosition = com.google.android.gms.maps.model.CameraPosition.Builder()
+                .target(LatLng(location.latitude, location.longitude))
+                .zoom(17f)
+                .bearing(location.bearing)
+                .tilt(45f)
+                .build()
+            googleMap?.animateCamera(CameraUpdateFactory.newCameraPosition(cameraPosition))
         }
     }
 
@@ -122,7 +115,7 @@ class DriveHudFragment : Fragment() {
             }
             // Ensure map controls avoid being obscured by HUD
             view.post {
-                val bottom = view.findViewById<View>(R.id.bottom_bar).height + view.findViewById<View>(R.id.btn_quick_report).height + dp(24)
+                val bottom = view.findViewById<View>(R.id.bottom_bar).height + view.findViewById<View>(R.id.hazard_buttons_container).height + dp(24)
                 val top = (view.findViewById<View>(R.id.mute_chip).height + view.findViewById<View>(R.id.next_chip).height + dp(16)).coerceAtLeast(dp(16))
                 gMap.setPadding(dp(16), top, dp(16), bottom)
             }
@@ -131,9 +124,21 @@ class DriveHudFragment : Fragment() {
 
         // Controls
         val btnStop = view.findViewById<Button>(R.id.btn_stop)
-        val btnQuick = view.findViewById<com.google.android.material.button.MaterialButton>(R.id.btn_quick_report)
         txtSpeed = view.findViewById(R.id.txt_speed_value)
         txtBearing = view.findViewById(R.id.txt_bearing_value)
+
+        val btnReportBump = view.findViewById<com.google.android.material.button.MaterialButton>(R.id.btn_report_bump)
+        val btnReportPothole = view.findViewById<com.google.android.material.button.MaterialButton>(R.id.btn_report_pothole)
+        val btnReportRumble = view.findViewById<com.google.android.material.button.MaterialButton>(R.id.btn_report_rumble)
+        val btnReportZone = view.findViewById<com.google.android.material.button.MaterialButton>(R.id.btn_report_zone)
+
+        btnReportBump.setOnClickListener { report(HazardType.SPEED_BUMP) }
+        btnReportPothole.setOnClickListener { report(HazardType.POTHOLE) }
+        btnReportRumble.setOnClickListener { report(HazardType.RUMBLE_STRIP) }
+        btnReportZone.setOnClickListener {
+            // The zone reporting still needs the sheet for start/end points
+            DriverReportSheet.newInstance(HazardType.SPEED_LIMIT_ZONE).show(parentFragmentManager, "driver_report")
+        }
 
         btnStop.setOnClickListener {
             (activity as? com.roadwatch.app.MainActivity)?.stopDriveMode()
@@ -155,9 +160,6 @@ class DriveHudFragment : Fragment() {
         } else {
             chip.visibility = View.GONE
         }
-
-        // Primary action: open the large driver report sheet with clearer options
-        btnQuick.setOnClickListener { DriverReportSheet().show(parentFragmentManager, "driver_report") }
 
         // Initialize idle tracking baseline
         view.post {
@@ -258,12 +260,17 @@ class DriveHudFragment : Fragment() {
                             showAlertOverlay(text)
                         }
                         "com.roadwatch.REFRESH_HAZARDS" -> refreshMarkers()
+                        "com.roadwatch.HAZARD_REPORTED" -> {
+                            val hazardDetails = intent.getStringExtra("hazard_details") ?: return
+                            showHazardReportedPopup(hazardDetails)
+                        }
                     }
                 }
             }
             val filter = IntentFilter().apply {
                 addAction("com.roadwatch.ALERT_OVERLAY")
                 addAction("com.roadwatch.REFRESH_HAZARDS")
+                addAction("com.roadwatch.HAZARD_REPORTED")
             }
             requireContext().registerReceiver(overlayReceiver, filter)
         }
@@ -282,9 +289,9 @@ class DriveHudFragment : Fragment() {
     companion object {
         private const val REQ_LOC_FINE = 2001
         private const val REQ_NOTIF = 2002
-        private const val MIN_HEADING_AGREE_DEG = 25.0
-        private const val ONE_WAY_MAX_HEADING_DEG = 15.0
-        private const val MAX_LATERAL_OFFSET_METERS = 15.0
+        private const val MIN_HEADING_AGREE_DEG = 15.0
+        private const val ONE_WAY_MAX_HEADING_DEG = 10.0
+        private const val MAX_LATERAL_OFFSET_METERS = 7.0
     }
 
     private fun vectorToBitmapDescriptor(resId: Int, scale: Float = 1.0f): BitmapDescriptor {
@@ -387,6 +394,84 @@ class DriveHudFragment : Fragment() {
             }
         } catch (_: Exception) {}
         parentFragmentManager.popBackStack()
+    }
+
+    private fun report(selected: HazardType) {
+        val loc = com.roadwatch.core.location.DriveModeService.lastKnownLocation
+        if (loc == null) {
+            com.roadwatch.ui.UiAlerts.error(view, "Location unavailable")
+            return
+        }
+
+        if (loc.speed < 1.0f) {
+            com.roadwatch.ui.UiAlerts.info(view, "Please start moving to report a hazard.")
+            return
+        }
+
+        val userBearing = if (loc.hasBearing()) loc.bearing else 0.0f
+        val roadBearing = getRoadBearing(loc.latitude, loc.longitude) // Placeholder
+        val bearingDifference = (userBearing - roadBearing + 360) % 360
+        val directionality = if (bearingDifference <= 30 || bearingDifference >= 330) {
+            "ONE_WAY"
+        } else {
+            "OPPOSITE"
+        }
+
+        val repo = SeedRepository(requireContext())
+        val result = repo.addUserHazardWithDedup(
+            Hazard(
+                type = selected,
+                lat = loc.latitude,
+                lng = loc.longitude,
+                reportedHeadingDeg = userBearing,
+                directionality = directionality,
+                userBearing = userBearing,
+                roadBearing = roadBearing,
+                active = true,
+                source = "USER",
+                createdAt = java.time.Instant.now()
+            )
+        )
+        when (result) {
+            SeedRepository.AddResult.ADDED -> {
+                com.roadwatch.ui.UiAlerts.success(view, "Reported ${selected.name}")
+                if (com.roadwatch.prefs.AppPrefs.isHapticsEnabled(requireContext())) {
+                    try { com.roadwatch.core.util.Haptics.tap(requireContext()) } catch (_: Exception) {}
+                }
+                try {
+                    val refreshIntent = android.content.Intent("com.roadwatch.REFRESH_HAZARDS")
+                    requireContext().sendBroadcast(refreshIntent)
+
+                    val details = "Type: ${selected.name}\n" +
+                            "Location: (${loc.latitude}, ${loc.longitude})\n" +
+                            "User Bearing: $userBearing\n" +
+                            "Road Bearing: $roadBearing\n" +
+                            "Directionality: $directionality"
+                    val reportIntent = android.content.Intent("com.roadwatch.HAZARD_REPORTED").apply {
+                        putExtra("hazard_details", details)
+                    }
+                    requireContext().sendBroadcast(reportIntent)
+                } catch (_: Exception) {}
+            }
+            SeedRepository.AddResult.DUPLICATE_NEARBY -> com.roadwatch.ui.UiAlerts.warn(view, "Similar ${selected.name.lowercase().replace('_',' ')} within 30 m")
+            else -> com.roadwatch.ui.UiAlerts.error(view, "Report failed")
+        }
+        // Hide the buttons and show the main report button again
+    }
+
+    // Placeholder for road bearing service
+    private fun getRoadBearing(lat: Double, lng: Double): Float {
+        // In a real app, this would call a mapping service API
+        // For now, we'll return a random bearing for simulation
+        return (0..360).random().toFloat()
+    }
+
+    private fun showHazardReportedPopup(hazardDetails: String) {
+        android.app.AlertDialog.Builder(requireContext())
+            .setTitle("Hazard Reported")
+            .setMessage(hazardDetails)
+            .setPositiveButton("OK", null)
+            .show()
     }
 
     private fun showAlertOverlay(text: String) {

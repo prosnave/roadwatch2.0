@@ -247,6 +247,7 @@ class AlertManager(private val context: Context) {
         val headingRad = Math.toRadians(loc.bearing.toDouble())
         if (!hasBearing) return null
         hazards.forEach { h ->
+            if (h.directionality == "OPPOSITE") return@forEach
             val d = distanceMeters(loc.latitude, loc.longitude, h.lat, h.lng)
             if (d > lead) return@forEach
             // Dual-carriage filter: heading agreement and lateral offset
@@ -281,6 +282,7 @@ class AlertManager(private val context: Context) {
         val headingRad = Math.toRadians(loc.bearing.toDouble())
         if (!hasBearing) return null
         hazards.forEach { h ->
+            if (h.directionality == "OPPOSITE") return@forEach
             if (h === current) return@forEach
             val (tLat, tLng) = targetPoint(h)
             val d = distanceMeters(loc.latitude, loc.longitude, tLat, tLng)
@@ -384,6 +386,7 @@ class AlertManager(private val context: Context) {
         val headingRad = Math.toRadians(loc.bearing.toDouble())
         val list = mutableListOf<Ahead>()
         hazards.forEach { h ->
+            if (h.directionality == "OPPOSITE") return@forEach
             val d = distanceMeters(loc.latitude, loc.longitude, h.lat, h.lng)
             if (d > lead) return@forEach
             if (hasBearing) {
@@ -439,10 +442,10 @@ class AlertManager(private val context: Context) {
 
     companion object {
         private const val MIN_GAP_MS = 10_000L
-        private const val MIN_HEADING_AGREE_DEG = 25.0
-        private const val MAX_LATERAL_OFFSET_METERS = 15.0
+        private const val MIN_HEADING_AGREE_DEG = 15.0
+        private const val MAX_LATERAL_OFFSET_METERS = 7.0
         private const val QUIET_MS = 30_000L
-        private const val ONE_WAY_MAX_HEADING_DEG = 15.0
+        private const val ONE_WAY_MAX_HEADING_DEG = 10.0
         private const val NEXT_QUIET_SLOW_MS = 20_000L
     }
 
