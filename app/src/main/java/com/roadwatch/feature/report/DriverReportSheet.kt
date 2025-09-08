@@ -70,19 +70,6 @@ class DriverReportSheet : BottomSheetDialogFragment() {
         var zoneStart: android.location.Location? = null
         var zoneEnd: android.location.Location? = null
 
-        fun currentLoc(): android.location.Location? {
-            val lm = requireContext().getSystemService(android.content.Context.LOCATION_SERVICE) as android.location.LocationManager
-            val hasFine = requireContext().checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-            if (!hasFine) return null
-            val providers = lm.getProviders(true)
-            var best: android.location.Location? = null
-            for (p in providers) {
-                val l = lm.getLastKnownLocation(p) ?: continue
-                if (best == null || l.accuracy < best!!.accuracy) best = l
-            }
-            return best
-        }
-
         fun report(selected: HazardType) {
             val loc = DriveModeService.lastKnownLocation
             if (loc == null) {
@@ -148,21 +135,76 @@ class DriverReportSheet : BottomSheetDialogFragment() {
         btnPothole.setOnClickListener { report(HazardType.POTHOLE) }
         btnRumble.setOnClickListener { report(HazardType.RUMBLE_STRIP) }
         btnZone.setOnClickListener { zoneBlock.visibility = View.VISIBLE }
+        fun validateZone(): String? {
+            val kph = edtSpeed.text.toString().toIntOrNull()
+            if (kph == null) {
+                btnZSubmit.isEnabled = false
+                return "Please enter a valid speed limit."
+            }
+            if (zoneStart == null) {
+                btnZSubmit.isEnabled = false
+                return "Please set a start point."
+            }
+            if (zoneEnd == null) {
+                btnZSubmit.isEnabled = false
+                return "Please set an end point."
+            }
+            val distance = distance(zoneStart!!, zoneEnd!!)
+            if (distance < 100) {
+                btnZSubmit.isEnabled = false
+                return "Zone is too short (min 100m)."
+            }
+            btnZSubmit.isEnabled = true
+            return null
+        }
+
+        edtSpeed.addTextChangedListener(object : android.text.TextWatcher {
+            override fun afterTextChanged(s: android.text.Editable?) { validateZone() }
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+        })
+
         btnZStart.setOnClickListener {
-            zoneStart = currentLoc()
-            txtZStatus.text = "Start: ${zoneStart?.latitude?.let { String.format("%.5f", it) } ?: "—"}   End: ${zoneEnd?.latitude?.let { String.format("%.5f", it) } ?: "—"}"
+            val loc = DriveModeService.lastKnownLocation
+            if (loc == null) {
+                com.roadwatch.ui.UiAlerts.error(view, "Location unavailable.")
+                return@setOnClickListener
+            }
+            zoneStart = loc
+            val startText = zoneStart?.let { String.format("%.5f, %.5f", it.latitude, it.longitude) } ?: "—"
+            val endText = zoneEnd?.let { String.format("%.5f, %.5f", it.latitude, it.longitude) } ?: "—"
+            txtZStatus.text = "Start: $startText   End: $endText"
+            validateZone()
         }
         btnZEnd.setOnClickListener {
-            zoneEnd = currentLoc()
-            txtZStatus.text = "Start: ${zoneStart?.latitude?.let { String.format("%.5f", it) } ?: "—"}   End: ${zoneEnd?.latitude?.let { String.format("%.5f", it) } ?: "—"}"
+            val loc = DriveModeService.lastKnownLocation
+            if (loc == null) {
+                com.roadwatch.ui.UiAlerts.error(view, "Location unavailable.")
+                return@setOnClickListener
+            }
+            zoneEnd = loc
+            val startText = zoneStart?.let { String.format("%.5f, %.5f", it.latitude, it.longitude) } ?: "—"
+            val endText = zoneEnd?.let { String.format("%.5f, %.5f", it.latitude, it.longitude) } ?: "—"
+            txtZStatus.text = "Start: $startText   End: $endText"
+            validateZone()
         }
         btnZSubmit.setOnClickListener {
+            val errorMessage = validateZone()
+            if (errorMessage != null) {
+                com.roadwatch.ui.UiAlerts.error(view, errorMessage)
+                if (errorMessage.contains("Zone is too short")) {
+                    zoneEnd = null
+                    val startText = zoneStart?.let { String.format("%.5f, %.5f", it.latitude, it.longitude) } ?: "—"
+                    txtZStatus.text = "Start: $startText   End: —"
+                    validateZone()
+                }
+                return@setOnClickListener
+            }
+
             val loc = DriveModeService.lastKnownLocation
             if (loc == null) { com.roadwatch.ui.UiAlerts.error(view, "Location unavailable"); return@setOnClickListener }
-            val kph = edtSpeed.text.toString().toIntOrNull()
-            if (zoneStart == null || zoneEnd == null) { com.roadwatch.ui.UiAlerts.info(view, "Set start and end of zone"); return@setOnClickListener }
+            val kph = edtSpeed.text.toString().toInt()
             val len = distance(zoneStart!!, zoneEnd!!).toInt()
-            if (len < 100) { com.roadwatch.ui.UiAlerts.info(view, "Zone too short (min 100m)"); return@setOnClickListener }
             val repo = SeedRepository(requireContext())
             val userBearing = if (loc.hasBearing()) loc.bearing else 0.0f
             val roadBearing = getRoadBearing(loc.latitude, loc.longitude) // Placeholder
