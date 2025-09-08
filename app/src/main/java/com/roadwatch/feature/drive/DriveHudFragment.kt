@@ -403,7 +403,7 @@ class DriveHudFragment : Fragment() {
             return
         }
 
-        if (loc.speed < 1.0f) {
+        if (loc.speed < 0.5f) {
             com.roadwatch.ui.UiAlerts.info(view, "Please start moving to report a hazard.")
             return
         }
