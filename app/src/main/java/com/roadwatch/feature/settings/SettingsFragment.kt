@@ -46,8 +46,9 @@ class SettingsFragment : Fragment() {
         val btnReset = view.findViewById<Button>(R.id.btn_reset_data)
         val btnShare = view.findViewById<Button>(R.id.btn_share_export)
         val switchBg = view.findViewById<android.widget.Switch>(R.id.switch_bg_alerts)
+        val switchHaptics = view.findViewById<android.widget.Switch>(R.id.switch_haptics)
         val spnFocus = view.findViewById<android.widget.Spinner>(R.id.spn_audio_focus)
-        val switchPassenger = view.findViewById<android.widget.Switch>(R.id.switch_passenger)
+        val switchAutoResume = view.findViewById<android.widget.Switch>(R.id.switch_auto_resume)
         val spnCurve = view.findViewById<android.widget.Spinner>(R.id.spn_speed_curve)
         val edtZoneEnter = view.findViewById<android.widget.EditText>(R.id.edt_zone_enter)
         val edtZoneExit = view.findViewById<android.widget.EditText>(R.id.edt_zone_exit)
@@ -64,6 +65,27 @@ class SettingsFragment : Fragment() {
         btnShare.visibility = if (isAdmin) View.VISIBLE else View.GONE
         btnReset.visibility = if (isAdmin) View.VISIBLE else View.GONE
 
+        fun refreshDataButtons() {
+            ioScope.launch {
+                val repo = SeedRepository(requireContext())
+                val (seedResult, seeds) = repo.loadSeeds()
+                val users = repo.loadUserHazards()
+                val seedsCount = seeds.size
+                val userCount = users.size
+                requireActivity().runOnUiThread {
+                    btnReload.visibility = if (isAdmin && seedsCount > 0) View.VISIBLE else View.GONE
+                    val anyData = (seedsCount + userCount) > 0
+                    btnExport.visibility = if (isAdmin && anyData) View.VISIBLE else View.GONE
+                    btnShare.visibility = if (isAdmin && anyData) View.VISIBLE else View.GONE
+                    // Hide Manage/View Locations when no data at all
+                    btnAdmin.visibility = if (anyData) View.VISIBLE else View.GONE
+                }
+            }
+        }
+
+        // Initialize data-driven visibilities
+        refreshDataButtons()
+
         btnReload.setOnClickListener {
             android.app.AlertDialog.Builder(requireContext())
                 .setTitle("Reload Seed Hazards")
@@ -78,6 +100,7 @@ class SettingsFragment : Fragment() {
                             } else {
                                 "Seed reload failed"
                             }
+                            refreshDataButtons()
                         }
                     }
                 }
@@ -86,17 +109,12 @@ class SettingsFragment : Fragment() {
         }
 
         btnTestAlert.setOnClickListener {
-            ensureNotificationPermission { granted ->
-                if (granted) {
-                    NotificationHelper.ensureChannels(requireContext())
-                    NotificationHelper.showTestAlert(requireContext(), "Test Alert", "Road hazard ahead")
-                }
-                ensureTts()
-                if (ttsReady) {
-                    tts?.speak("RoadWatch test alert: hazard ahead", TextToSpeech.QUEUE_FLUSH, null, "rw_test")
-                }
-                status.text = getString(R.string.test_alert)
+            ensureTts()
+            if (ttsReady) {
+                tts?.speak("RoadWatch test alert: hazard ahead", TextToSpeech.QUEUE_FLUSH, null, "rw_test")
             }
+            com.roadwatch.ui.UiAlerts.info(view, "Test alert: hazard ahead")
+            status.text = getString(R.string.test_alert)
         }
 
         btnReset.setOnClickListener {
@@ -116,6 +134,7 @@ class SettingsFragment : Fragment() {
                         requireActivity().runOnUiThread {
                             status.text = "Local data reset."
                             android.widget.Toast.makeText(requireContext(), "Local data reset", android.widget.Toast.LENGTH_SHORT).show()
+                            refreshDataButtons()
                         }
                     }
                 }
@@ -133,20 +152,20 @@ class SettingsFragment : Fragment() {
                 val exportDir = File(requireContext().filesDir, "exports").apply { mkdirs() }
                 val out = File(exportDir, "hazards_export.csv")
                 out.bufferedWriter().use { w ->
-                    w.appendLine("type,lat,lng,source,active,votes,bearingSide,directionality,createdAt,speedLimitKph,zoneLengthMeters")
+                    w.appendLine("type,lat,lng,source,active,votes,directionality,createdAt,speedLimitKph,zoneLengthMeters,zoneStartLat,zoneStartLng,zoneEndLat,zoneEndLng")
                     // Seeds with active based on overrides
                     seeds.forEach { h ->
                         val key = com.roadwatch.data.SeedOverrides.keyOf(h)
                         val active = h.active && !com.roadwatch.data.SeedOverrides.isDisabled(requireContext(), key)
                         val votes = com.roadwatch.data.CommunityVotes.getVotes(requireContext(), key)
-                        w.appendLine("${h.type},${h.lat},${h.lng},SEED,${active},${votes},${h.bearingSide},${h.directionality},,${h.speedLimitKph ?: ""},${h.zoneLengthMeters ?: ""}")
+                        w.appendLine("${h.type},${h.lat},${h.lng},SEED,${active},${votes},${h.directionality},,${h.speedLimitKph ?: ""},${h.zoneLengthMeters ?: ""},${h.zoneStartLat ?: ""},${h.zoneStartLng ?: ""},${h.zoneEndLat ?: ""},${h.zoneEndLng ?: ""}")
                     }
                     // User hazards
                     users.forEach { h ->
                         val key = com.roadwatch.data.SeedOverrides.keyOf(h)
                         val votes = com.roadwatch.data.CommunityVotes.getVotes(requireContext(), key)
-                        w.appendLine("${h.type},${h.lat},${h.lng},USER,${h.active},${votes},${h.bearingSide},${h.directionality},${h.createdAt},${h.speedLimitKph ?: ""},${h.zoneLengthMeters ?: ""}")
-                    }
+                        w.appendLine("${h.type},${h.lat},${h.lng},USER,${h.active},${votes},${h.directionality},${h.createdAt},${h.speedLimitKph ?: ""},${h.zoneLengthMeters ?: ""},${h.zoneStartLat ?: ""},${h.zoneStartLng ?: ""},${h.zoneEndLat ?: ""},${h.zoneEndLng ?: ""}")
+                }
                 }
                 // Also copy to public Downloads/RoadWatch (Android Q+)
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
@@ -168,6 +187,7 @@ class SettingsFragment : Fragment() {
                 requireActivity().runOnUiThread {
                     val total = seeds.size + users.size
                     status.text = if (seedLoad.loaded) "Exported ${total} hazards (seeds + user)" else "Export completed (seed load status: failed)"
+                    refreshDataButtons()
                 }
             }
         }
@@ -208,20 +228,26 @@ class SettingsFragment : Fragment() {
                                 val source = cols.getOrNull(3) ?: "USER"
                                 val active = cols.getOrNull(4)?.toBooleanStrictOrNull() ?: true
                                 val votes = cols.getOrNull(5)?.toIntOrNull() ?: 0
-                                val bearingSide = cols.getOrNull(6) ?: "UNKNOWN"
-                                val directionality = cols.getOrNull(7) ?: "UNKNOWN"
-                                val createdAt = cols.getOrNull(8) ?: ""
-                                val speedKph = cols.getOrNull(9)?.toIntOrNull()
-                                val zoneLen = cols.getOrNull(10)?.toIntOrNull()
+                                val directionality = cols.getOrNull(6) ?: "UNKNOWN"
+                                val createdAt = cols.getOrNull(7) ?: ""
+                                val speedKph = cols.getOrNull(8)?.toIntOrNull()
+                                val zoneLen = cols.getOrNull(9)?.toIntOrNull()
+                                val zoneStartLat = cols.getOrNull(10)?.toDoubleOrNull()
+                                val zoneStartLng = cols.getOrNull(11)?.toDoubleOrNull()
+                                val zoneEndLat = cols.getOrNull(12)?.toDoubleOrNull()
+                                val zoneEndLng = cols.getOrNull(13)?.toDoubleOrNull()
                                 val h = com.roadwatch.data.Hazard(
                                     type = type,
                                     lat = lat,
                                     lng = lng,
                                     active = active,
-                                    bearingSide = bearingSide,
                                     directionality = directionality,
                                     speedLimitKph = speedKph,
                                     zoneLengthMeters = zoneLen,
+                                    zoneStartLat = zoneStartLat,
+                                    zoneStartLng = zoneStartLng,
+                                    zoneEndLat = zoneEndLat,
+                                    zoneEndLng = zoneEndLng,
                                 )
                                 val key = com.roadwatch.data.SeedOverrides.keyOf(h)
                                 // Merge votes (take max of local and imported)
@@ -241,6 +267,7 @@ class SettingsFragment : Fragment() {
                 }
                 requireActivity().runOnUiThread {
                     status.text = if (imported > 0) "Imported $imported rows (merged)" else "No export file found or empty"
+                    refreshDataButtons()
                 }
             }
         }
@@ -255,7 +282,8 @@ class SettingsFragment : Fragment() {
         spnFocus.adapter = android.widget.ArrayAdapter(requireContext(), android.R.layout.simple_spinner_dropdown_item, listOf("DUCK", "EXCLUSIVE"))
         spnCurve.adapter = android.widget.ArrayAdapter(requireContext(), android.R.layout.simple_spinner_dropdown_item, listOf("CONSERVATIVE", "NORMAL", "AGGRESSIVE"))
         switchBg.isChecked = com.roadwatch.prefs.AppPrefs.isBackgroundAlerts(requireContext())
-        switchPassenger.isChecked = com.roadwatch.prefs.AppPrefs.isPassengerEnabled(requireContext())
+        switchHaptics.isChecked = com.roadwatch.prefs.AppPrefs.isHapticsEnabled(requireContext())
+        switchAutoResume.isChecked = com.roadwatch.prefs.AppPrefs.isAutoResumeEnabled(requireContext())
         spnFocus.setSelection(if (com.roadwatch.prefs.AppPrefs.getAudioFocusMode(requireContext()) == "EXCLUSIVE") 1 else 0)
         val curve = com.roadwatch.prefs.AppPrefs.getSpeedCurve(requireContext())
         spnCurve.setSelection(when (curve) { "CONSERVATIVE" -> 0; "AGGRESSIVE" -> 2; else -> 1 })
@@ -279,6 +307,8 @@ class SettingsFragment : Fragment() {
         audioSwitch.setOnCheckedChangeListener { _, checked -> com.roadwatch.prefs.AppPrefs.setAlertChannels(requireContext(), checked, com.roadwatch.prefs.AppPrefs.isVisualEnabled(requireContext())) }
         visualSwitch.setOnCheckedChangeListener { _, checked -> com.roadwatch.prefs.AppPrefs.setAlertChannels(requireContext(), com.roadwatch.prefs.AppPrefs.isAudioEnabled(requireContext()), checked) }
         switchCluster.setOnCheckedChangeListener { _, checked -> com.roadwatch.prefs.AppPrefs.setClusterEnabled(requireContext(), checked) }
+        switchHaptics.setOnCheckedChangeListener { _, checked -> com.roadwatch.prefs.AppPrefs.setHapticsEnabled(requireContext(), checked) }
+        switchAutoResume.setOnCheckedChangeListener { _, checked -> com.roadwatch.prefs.AppPrefs.setAutoResumeEnabled(requireContext(), checked) }
         edtClusterSpeed.setOnFocusChangeListener { _, hasFocus ->
             if (!hasFocus) {
                 val kph = edtClusterSpeed.text.toString().toIntOrNull() ?: 50
@@ -304,9 +334,6 @@ class SettingsFragment : Fragment() {
                 com.roadwatch.prefs.AppPrefs.setSpeedCurve(requireContext(), value)
             }
             override fun onNothingSelected(parent: android.widget.AdapterView<*>) {}
-        }
-        switchPassenger.setOnCheckedChangeListener { _, isChecked ->
-            com.roadwatch.prefs.AppPrefs.setPassengerEnabled(requireContext(), isChecked)
         }
         btnZoneSave.setOnClickListener {
             val repeat = edtZoneRepeat.text.toString().toLongOrNull() ?: 60000L

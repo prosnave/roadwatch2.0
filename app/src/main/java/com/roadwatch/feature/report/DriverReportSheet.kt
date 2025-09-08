@@ -8,9 +8,7 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.ArrayAdapter
 import android.widget.Button
-import android.widget.Spinner
 import android.widget.Toast
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 import com.roadwatch.app.R
@@ -18,6 +16,7 @@ import com.roadwatch.data.Hazard
 import com.roadwatch.data.HazardType
 import com.roadwatch.data.SeedRepository
 import java.time.Instant
+import kotlin.math.*
 
 class DriverReportSheet : BottomSheetDialogFragment() {
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? {
@@ -26,53 +25,136 @@ class DriverReportSheet : BottomSheetDialogFragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-        val typeSpinner = view.findViewById<Spinner>(R.id.spn_type)
-        val btnQuick = view.findViewById<Button>(R.id.btn_quick)
-        val btnReport = view.findViewById<Button>(R.id.btn_report)
+        val toggleDir = view.findViewById<com.google.android.material.button.MaterialButtonToggleGroup>(R.id.toggle_direction)
+        // Large hazard type buttons
+        val btnBump = view.findViewById<Button>(R.id.btn_type_bump)
+        val btnPothole = view.findViewById<Button>(R.id.btn_type_pothole)
+        val btnRumble = view.findViewById<Button>(R.id.btn_type_rumble)
+        val btnZone = view.findViewById<Button>(R.id.btn_type_zone)
+        val zoneBlock = view.findViewById<android.widget.LinearLayout>(R.id.zone_block_driver)
+        val edtSpeed = view.findViewById<android.widget.EditText>(R.id.edt_speed_kph_driver)
+        val btnZStart = view.findViewById<Button>(R.id.btn_zone_start_driver)
+        val btnZEnd = view.findViewById<Button>(R.id.btn_zone_end_driver)
+        val txtZStatus = view.findViewById<android.widget.TextView>(R.id.txt_zone_status_driver)
+        val btnZSubmit = view.findViewById<Button>(R.id.btn_zone_submit_driver)
+        val typeHeader = view.findViewById<android.widget.TextView>(R.id.txt_choose_type)
+        val typeContainer = view.findViewById<android.widget.LinearLayout>(R.id.type_buttons_container)
 
-        val isAdmin = com.roadwatch.app.BuildConfig.IS_ADMIN
-        val items = if (isAdmin) HazardType.entries.filter { it != HazardType.SPEED_LIMIT_ZONE }.map { it.name } else listOf(HazardType.SPEED_BUMP.name)
-        typeSpinner.adapter = ArrayAdapter(requireContext(), android.R.layout.simple_spinner_dropdown_item, items)
-        if (!isAdmin) {
-            typeSpinner.isEnabled = false
+        // Show large type buttons for all users (no separate quick report)
+        typeHeader.visibility = View.VISIBLE
+        typeContainer.visibility = View.VISIBLE
+
+        var zoneStart: android.location.Location? = null
+        var zoneEnd: android.location.Location? = null
+
+        fun currentLoc(): android.location.Location? {
+            val lm = requireContext().getSystemService(android.content.Context.LOCATION_SERVICE) as android.location.LocationManager
+            val hasFine = requireContext().checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+            if (!hasFine) return null
+            val providers = lm.getProviders(true)
+            var best: android.location.Location? = null
+            for (p in providers) {
+                val l = lm.getLastKnownLocation(p) ?: continue
+                if (best == null || l.accuracy < best!!.accuracy) best = l
+            }
+            return best
         }
 
         fun report(selected: HazardType) {
             val loc = lastKnown() ?: run {
-                Toast.makeText(requireContext(), "Location unavailable", Toast.LENGTH_SHORT).show()
+                com.roadwatch.ui.UiAlerts.error(view, "Location unavailable")
                 return
             }
             val repo = SeedRepository(requireContext())
+            // Default: most spot hazards affect only your carriageway (ONE_WAY); zones usually both directions.
             fun defaultDirectionality(t: HazardType): String = when (t) {
-                HazardType.SPEED_BUMP, HazardType.POTHOLE, HazardType.RUMBLE_STRIP, HazardType.SPEED_LIMIT_ZONE -> "BIDIRECTIONAL"
+                HazardType.SPEED_LIMIT_ZONE -> "BIDIRECTIONAL"
+                else -> "ONE_WAY"
             }
             val result = repo.addUserHazardWithDedup(
                 Hazard(
                     type = selected,
                     lat = loc.latitude,
                     lng = loc.longitude,
-                    bearingSide = "CENTER",
-                    directionality = defaultDirectionality(selected),
+                    directionality = if (toggleDir?.checkedButtonId == R.id.btn_two_way) "BIDIRECTIONAL" else "ONE_WAY",
                     active = true,
                     source = "USER",
                     createdAt = Instant.now()
                 )
             )
             when (result) {
-                SeedRepository.AddResult.ADDED -> Toast.makeText(requireContext(), "Reported ${selected.name}", Toast.LENGTH_SHORT).show()
-                SeedRepository.AddResult.DUPLICATE_NEARBY -> Toast.makeText(requireContext(), "Similar ${selected.name.lowercase().replace('_',' ')} within 30 m", Toast.LENGTH_SHORT).show()
-                else -> Toast.makeText(requireContext(), "Report failed", Toast.LENGTH_SHORT).show()
+                SeedRepository.AddResult.ADDED -> {
+                    com.roadwatch.ui.UiAlerts.success(view, "Reported ${selected.name}")
+                    if (com.roadwatch.prefs.AppPrefs.isHapticsEnabled(requireContext())) {
+                        try { com.roadwatch.core.util.Haptics.tap(requireContext()) } catch (_: Exception) {}
+                    }
+                    try {
+                        val intent = android.content.Intent("com.roadwatch.REFRESH_HAZARDS")
+                        requireContext().sendBroadcast(intent)
+                    } catch (_: Exception) {}
+                    dismissAllowingStateLoss()
+                }
+                SeedRepository.AddResult.DUPLICATE_NEARBY -> com.roadwatch.ui.UiAlerts.warn(view, "Similar ${selected.name.lowercase().replace('_',' ')} within 30 m")
+                else -> com.roadwatch.ui.UiAlerts.error(view, "Report failed")
             }
-            dismissAllowingStateLoss()
+            // Only dismiss on success; keep sheet open for errors/duplicates so user can adjust
         }
 
-        btnQuick.setOnClickListener {
-            // Default type is SPEED_BUMP as a sensible default
-            report(HazardType.SPEED_BUMP)
+        btnBump.setOnClickListener { report(HazardType.SPEED_BUMP) }
+        btnPothole.setOnClickListener { report(HazardType.POTHOLE) }
+        btnRumble.setOnClickListener { report(HazardType.RUMBLE_STRIP) }
+        btnZone.setOnClickListener { zoneBlock.visibility = View.VISIBLE }
+        btnZStart.setOnClickListener {
+            zoneStart = currentLoc()
+            txtZStatus.text = "Start: ${zoneStart?.latitude?.let { String.format("%.5f", it) } ?: "—"}   End: ${zoneEnd?.latitude?.let { String.format("%.5f", it) } ?: "—"}"
         }
-        btnReport.setOnClickListener {
-            val selected = HazardType.valueOf(typeSpinner.selectedItem as String)
-            report(selected)
+        btnZEnd.setOnClickListener {
+            zoneEnd = currentLoc()
+            txtZStatus.text = "Start: ${zoneStart?.latitude?.let { String.format("%.5f", it) } ?: "—"}   End: ${zoneEnd?.latitude?.let { String.format("%.5f", it) } ?: "—"}"
+        }
+        btnZSubmit.setOnClickListener {
+            val loc = lastKnown()
+            if (loc == null) { com.roadwatch.ui.UiAlerts.error(view, "Location unavailable"); return@setOnClickListener }
+            val kph = edtSpeed.text.toString().toIntOrNull()
+            if (zoneStart == null || zoneEnd == null) { com.roadwatch.ui.UiAlerts.info(view, "Set start and end of zone"); return@setOnClickListener }
+            val len = distance(zoneStart!!, zoneEnd!!).toInt()
+            if (len < 100) { com.roadwatch.ui.UiAlerts.info(view, "Zone too short (min 100m)"); return@setOnClickListener }
+            val repo = SeedRepository(requireContext())
+            val h = Hazard(
+                type = HazardType.SPEED_LIMIT_ZONE,
+                lat = loc.latitude,
+                lng = loc.longitude,
+                directionality = if (toggleDir?.checkedButtonId == R.id.btn_two_way) "BIDIRECTIONAL" else "ONE_WAY",
+                active = true,
+                source = "USER",
+                createdAt = Instant.now(),
+                speedLimitKph = kph,
+                zoneLengthMeters = len,
+                zoneStartLat = zoneStart?.latitude,
+                zoneStartLng = zoneStart?.longitude,
+                zoneEndLat = zoneEnd?.latitude,
+                zoneEndLng = zoneEnd?.longitude,
+            )
+            when (repo.addUserHazardWithDedup(h)) {
+                SeedRepository.AddResult.ADDED -> {
+                    com.roadwatch.ui.UiAlerts.success(view, "Zone reported")
+                    try { requireContext().sendBroadcast(android.content.Intent("com.roadwatch.REFRESH_HAZARDS")) } catch (_: Exception) {}
+                    dismissAllowingStateLoss()
+                }
+                SeedRepository.AddResult.DUPLICATE_NEARBY -> com.roadwatch.ui.UiAlerts.warn(view, "Similar zone nearby")
+                else -> com.roadwatch.ui.UiAlerts.error(view, "Report failed")
+            }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Close sheet if location permission revoked or providers disabled while open
+        val hasFine = requireContext().checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val lm = requireContext().getSystemService(android.content.Context.LOCATION_SERVICE) as LocationManager
+        val enabled = lm.isProviderEnabled(LocationManager.GPS_PROVIDER) || lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+        if (!hasFine || !enabled) {
+            try { dismissAllowingStateLoss() } catch (_: Exception) {}
         }
     }
 
@@ -88,4 +170,13 @@ class DriverReportSheet : BottomSheetDialogFragment() {
         }
         return best
     }
+}
+
+private fun distance(a: android.location.Location, b: android.location.Location): Double {
+    val R = 6371000.0
+    val dLat = Math.toRadians(b.latitude - a.latitude)
+    val dLon = Math.toRadians(b.longitude - a.longitude)
+    val x = sin(dLat / 2).pow(2.0) + cos(Math.toRadians(a.latitude)) * cos(Math.toRadians(b.latitude)) * sin(dLon / 2).pow(2.0)
+    val c = 2 * atan2(sqrt(x), sqrt(1 - x))
+    return R * c
 }

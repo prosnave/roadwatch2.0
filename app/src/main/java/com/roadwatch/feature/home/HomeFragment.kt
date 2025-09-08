@@ -76,6 +76,50 @@ class HomeFragment : Fragment() {
                 .addToBackStack(null)
                 .commit()
         }
+
+        // Auto-resume suggestion: if we stopped recently and moved >100m
+        view.post {
+            try {
+                if (!com.roadwatch.prefs.AppPrefs.isAutoResumeEnabled(requireContext())) return@post
+                val lastLat = com.roadwatch.prefs.AppPrefs.getLastAutoStopLat(requireContext())
+                val lastLng = com.roadwatch.prefs.AppPrefs.getLastAutoStopLng(requireContext())
+                val lastAt = com.roadwatch.prefs.AppPrefs.getLastAutoStopAt(requireContext())
+                if (lastLat != null && lastLng != null && lastAt != null && System.currentTimeMillis() - lastAt < 2 * 60 * 60 * 1000) {
+                    val lm = requireContext().getSystemService(android.content.Context.LOCATION_SERVICE) as LocationManager
+                    val providers = lm.getProviders(true)
+                    var best: android.location.Location? = null
+                    for (p in providers) {
+                        val l = lm.getLastKnownLocation(p) ?: continue
+                        if (best == null || l.accuracy < best!!.accuracy) best = l
+                    }
+                    if (best != null) {
+                        val d = distanceMeters(lastLat, lastLng, best!!.latitude, best!!.longitude)
+                        if (d > 100.0) {
+                            android.app.AlertDialog.Builder(requireContext())
+                                .setTitle("Resume Drive Mode?")
+                                .setMessage("You’ve moved ${d.toInt()} m since last stop.")
+                                .setPositiveButton("Resume") { _, _ ->
+                                    com.roadwatch.prefs.AppPrefs.clearAutoStop(requireContext())
+                                    startBtn.performClick()
+                                }
+                                .setNegativeButton("Not now", null)
+                                .show()
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
+    private fun distanceMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+        val R = 6371000.0
+        val dLat = Math.toRadians(lat2 - lat1)
+        val dLon = Math.toRadians(lon2 - lon1)
+        val a = kotlin.math.sin(dLat / 2) * kotlin.math.sin(dLat / 2) +
+                kotlin.math.cos(Math.toRadians(lat1)) * kotlin.math.cos(Math.toRadians(lat2)) *
+                kotlin.math.sin(dLon / 2) * kotlin.math.sin(dLon / 2)
+        val c = 2 * kotlin.math.atan2(kotlin.math.sqrt(a), kotlin.math.sqrt(1 - a))
+        return R * c
     }
 
     private fun ensureLocationEnabled(onReady: () -> Unit) {

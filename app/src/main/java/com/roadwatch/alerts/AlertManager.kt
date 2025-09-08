@@ -25,7 +25,17 @@ class AlertManager(private val context: Context) {
     init {
         tts = TextToSpeech(context) { status ->
             ttsReady = status == TextToSpeech.SUCCESS
-            if (ttsReady) tts?.language = Locale.getDefault()
+            if (ttsReady) {
+                tts?.language = Locale.getDefault()
+                try {
+                    tts?.setAudioAttributes(
+                        android.media.AudioAttributes.Builder()
+                            .setUsage(android.media.AudioAttributes.USAGE_ALARM)
+                            .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                            .build()
+                    )
+                } catch (_: Throwable) {}
+            }
         }
     }
 
@@ -37,6 +47,7 @@ class AlertManager(private val context: Context) {
         if (loc.speed < 1.5f) return // ~5.4 kph
 
         val nonZones = hazards.filter { it.type.name != "SPEED_LIMIT_ZONE" }
+        val allForNext = hazards // include zones for next-hazard evaluation
         val speedKph = loc.speed * 3.6
         val hasBearing = loc.hasBearing()
         val now = System.currentTimeMillis()
@@ -80,14 +91,17 @@ class AlertManager(private val context: Context) {
                             }
                         }
 
-                        NotificationHelper.ensureChannels(context)
-                        if (AppPrefs.isVisualEnabled(context)) {
-                            NotificationHelper.showTestAlert(context, title, text)
+                        // Status-bar notifications removed; rely on TTS (and optional in-app cues)
+                        // Haptics on alert
+                        if (AppPrefs.isHapticsEnabled(context)) {
+                            try { com.roadwatch.core.util.Haptics.tap(context) } catch (_: Exception) {}
                         }
                         if (ttsReady && AppPrefs.isAudioEnabled(context)) {
+                            ensurePlaybackVolume()
                             val f = followUp
                             if (f != null) speakDouble(text, f) else speakWithFocus(text)
                         }
+                        sendOverlay(text)
                         return
                     }
                 }
@@ -117,9 +131,10 @@ class AlertManager(private val context: Context) {
 
         var followUp: String? = null
         try {
-            val next = nextHazardAfter(loc, nonZones, target)
+            val next = nextHazardAfter(loc, allForNext, target)
             if (next != null) {
-                val nextDist = distanceMeters(loc.latitude, loc.longitude, next.lat, next.lng)
+                val (nLat, nLng) = targetPoint(next)
+                val nextDist = distanceMeters(loc.latitude, loc.longitude, nLat, nLng)
                 if (nextDist <= lead) {
                     val nextFriendly = next.type.name.replace('_', ' ').lowercase().replaceFirstChar { it.uppercase() }
                     val nice = nearestNiceDistance(nextDist.roundToInt())
@@ -132,14 +147,16 @@ class AlertManager(private val context: Context) {
             }
         } catch (_: Exception) {}
 
-        NotificationHelper.ensureChannels(context)
-        if (AppPrefs.isVisualEnabled(context)) {
-            NotificationHelper.showTestAlert(context, title, text)
+        // Status-bar notifications removed; rely on TTS (and optional haptics)
+        if (AppPrefs.isHapticsEnabled(context)) {
+            try { com.roadwatch.core.util.Haptics.tap(context) } catch (_: Exception) {}
         }
         if (ttsReady && AppPrefs.isAudioEnabled(context)) {
+            ensurePlaybackVolume()
             val f = followUp
             if (f != null) speakDouble(text, f) else speakWithFocus(text)
         }
+        sendOverlay(text)
     }
 
     private fun speakWithFocus(text: String) {
@@ -149,10 +166,12 @@ class AlertManager(private val context: Context) {
         var focusGranted = true
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val afr = AudioFocusRequest.Builder(focusGain)
-                .setAudioAttributes(android.media.AudioAttributes.Builder()
-                    .setUsage(android.media.AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
-                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
-                    .build())
+                .setAudioAttributes(
+                    android.media.AudioAttributes.Builder()
+                        .setUsage(android.media.AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build()
+                )
                 .build()
             focusGranted = am.requestAudioFocus(afr) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
             tts?.setOnUtteranceProgressListener(object: android.speech.tts.UtteranceProgressListener() {
@@ -174,10 +193,12 @@ class AlertManager(private val context: Context) {
         val focusGain = if (mode == "EXCLUSIVE") AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE else AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val afr = AudioFocusRequest.Builder(focusGain)
-                .setAudioAttributes(android.media.AudioAttributes.Builder()
-                    .setUsage(android.media.AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
-                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
-                    .build())
+                .setAudioAttributes(
+                    android.media.AudioAttributes.Builder()
+                        .setUsage(android.media.AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build()
+                )
                 .build()
             val granted = am.requestAudioFocus(afr) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
             tts?.setOnUtteranceProgressListener(object: android.speech.tts.UtteranceProgressListener() {
@@ -199,12 +220,32 @@ class AlertManager(private val context: Context) {
         }
     }
 
+    // Ensure volume is at least 50% and ideally max before speaking
+    private fun ensurePlaybackVolume() {
+        try {
+            val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+            val current = am.getStreamVolume(AudioManager.STREAM_MUSIC)
+            if (current < (max / 2)) {
+                am.setStreamVolume(AudioManager.STREAM_MUSIC, max, 0)
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun sendOverlay(text: String) {
+        try {
+            val intent = android.content.Intent("com.roadwatch.ALERT_OVERLAY").apply { putExtra("text", text) }
+            context.sendBroadcast(intent)
+        } catch (_: Exception) {}
+    }
+
     private fun upcomingHazard(loc: Location, hazards: List<Hazard>): Hazard? {
         val lead = leadDistanceMeters(loc.speed * 3.6) // speed m/s → km/h
         var best: Hazard? = null
-        var bestDist = Double.MAX_VALUE
+        var bestAlong = Double.MAX_VALUE
         val hasBearing = loc.hasBearing()
         val headingRad = Math.toRadians(loc.bearing.toDouble())
+        if (!hasBearing) return null
         hazards.forEach { h ->
             val d = distanceMeters(loc.latitude, loc.longitude, h.lat, h.lng)
             if (d > lead) return@forEach
@@ -216,11 +257,17 @@ class AlertManager(private val context: Context) {
                 if (headingDiffDeg > MIN_HEADING_AGREE_DEG) return@forEach
                 val lateral = lateralOffsetMeters(d, headingRad, bearingTo)
                 if (abs(lateral) > MAX_LATERAL_OFFSET_METERS) return@forEach
+                // Ensure hazard is actually ahead, not behind
+                val along = d * kotlin.math.cos(angleDelta(headingRad, bearingTo))
+                if (along <= 0.0) return@forEach
+                if (along < bestAlong) {
+                    best = h
+                    bestAlong = along
+                }
+                return@forEach
             }
-            if (d < bestDist) {
-                best = h
-                bestDist = d
-            }
+            // No bearing; fall back to nearest (rare)
+            if (d < bestAlong) { best = h; bestAlong = d }
         }
         return best
     }
@@ -229,28 +276,37 @@ class AlertManager(private val context: Context) {
         val lead = leadDistanceMeters(loc.speed * 3.6)
         val currentDist = distanceMeters(loc.latitude, loc.longitude, current.lat, current.lng)
         var best: Hazard? = null
-        var bestDist = Double.MAX_VALUE
+        var bestAlong = Double.MAX_VALUE
         val hasBearing = loc.hasBearing()
         val headingRad = Math.toRadians(loc.bearing.toDouble())
+        if (!hasBearing) return null
         hazards.forEach { h ->
             if (h === current) return@forEach
-            val d = distanceMeters(loc.latitude, loc.longitude, h.lat, h.lng)
+            val (tLat, tLng) = targetPoint(h)
+            val d = distanceMeters(loc.latitude, loc.longitude, tLat, tLng)
             if (d <= currentDist + 15.0) return@forEach // must be after current and not essentially the same point
             if (d > lead) return@forEach
             if (hasBearing) {
-                val bearingTo = bearingRadians(loc.latitude, loc.longitude, h.lat, h.lng)
+                val bearingTo = bearingRadians(loc.latitude, loc.longitude, tLat, tLng)
                 val headingDiffDeg = Math.toDegrees(angleDelta(headingRad, bearingTo).absoluteValue)
                 if (h.directionality == "ONE_WAY" && headingDiffDeg > ONE_WAY_MAX_HEADING_DEG) return@forEach
                 if (headingDiffDeg > MIN_HEADING_AGREE_DEG) return@forEach
                 val lateral = lateralOffsetMeters(d, headingRad, bearingTo)
                 if (abs(lateral) > MAX_LATERAL_OFFSET_METERS) return@forEach
+                val along = d * kotlin.math.cos(angleDelta(headingRad, bearingTo))
+                if (along <= 0.0) return@forEach
+                if (along < bestAlong) { best = h; bestAlong = along }
+                return@forEach
             }
-            if (d < bestDist) {
-                best = h
-                bestDist = d
-            }
+            if (d < bestAlong) { best = h; bestAlong = d }
         }
         return best
+    }
+
+    private fun targetPoint(h: Hazard): Pair<Double, Double> {
+        return if (h.type.name == "SPEED_LIMIT_ZONE" && h.zoneStartLat != null && h.zoneStartLng != null) {
+            h.zoneStartLat to h.zoneStartLng
+        } else h.lat to h.lng
     }
 
     private fun leadDistanceMeters(speedKph: Double): Double {
@@ -417,16 +473,15 @@ class AlertManager(private val context: Context) {
             zoneExitWarned = false
             val limit = zoneLimitKph
             val msg = if (limit != null) "Entering speed limit zone: limit is ${limit} km/h" else AppPrefs.getZoneEnter(context)
-            NotificationHelper.ensureChannels(context)
-            if (AppPrefs.isVisualEnabled(context)) NotificationHelper.showTestAlert(context, "Speed Limit", msg)
-            if (ttsReady && AppPrefs.isAudioEnabled(context)) speakWithFocus(msg)
+            if (ttsReady && AppPrefs.isAudioEnabled(context)) { ensurePlaybackVolume(); speakWithFocus(msg) }
+            sendOverlay(msg)
         } else if (inZone && inside) {
             if (now - lastZoneRepeat >= AppPrefs.getZoneRepeatMs(context)) {
                 lastZoneRepeat = now
                 val limit = zoneLimitKph
                 val msg = if (limit != null) "Speed limit ${limit} km/h" else AppPrefs.getZoneEnter(context)
-                if (AppPrefs.isVisualEnabled(context)) NotificationHelper.showTestAlert(context, "Speed Limit", msg)
-                if (ttsReady && AppPrefs.isAudioEnabled(context)) speakWithFocus(msg)
+                if (ttsReady && AppPrefs.isAudioEnabled(context)) { ensurePlaybackVolume(); speakWithFocus(msg) }
+                sendOverlay(msg)
             }
             // Pre-warn exit if we have zone length and entry
             val len = zoneLength
@@ -437,7 +492,6 @@ class AlertManager(private val context: Context) {
                 val remaining = len - traveled
                 if (remaining in 1.0..200.0) {
                     val msg = "Exiting speed limit zone in ${nearestNice(remaining)}"
-                    if (AppPrefs.isVisualEnabled(context)) NotificationHelper.showTestAlert(context, "Speed Limit", msg)
                     if (ttsReady && AppPrefs.isAudioEnabled(context)) speakWithFocus(msg)
                     zoneExitWarned = true
                 }
@@ -457,8 +511,8 @@ class AlertManager(private val context: Context) {
                     val remaining = ahead.second
                     if (remaining in 1.0..200.0) {
                         val msg = "Exiting speed limit zone in ${nearestNice(remaining)}"
-                        if (AppPrefs.isVisualEnabled(context)) NotificationHelper.showTestAlert(context, "Speed Limit", msg)
-                        if (ttsReady && AppPrefs.isAudioEnabled(context)) speakWithFocus(msg)
+                        if (ttsReady && AppPrefs.isAudioEnabled(context)) { ensurePlaybackVolume(); speakWithFocus(msg) }
+                        sendOverlay(msg)
                         zoneExitWarned = true
                     }
                 }
@@ -466,8 +520,8 @@ class AlertManager(private val context: Context) {
         } else if (inZone && !inside) {
             inZone = false
             val msg = if (zoneLimitKph != null) "Exiting speed limit zone" else AppPrefs.getZoneExit(context)
-            if (AppPrefs.isVisualEnabled(context)) NotificationHelper.showTestAlert(context, "Speed Limit", msg)
-            if (ttsReady && AppPrefs.isAudioEnabled(context)) speakWithFocus(msg)
+            if (ttsReady && AppPrefs.isAudioEnabled(context)) { ensurePlaybackVolume(); speakWithFocus(msg) }
+            sendOverlay(msg)
             zoneEntryLat = null; zoneEntryLng = null; zoneLength = null; zoneLimitKph = null; zoneExitWarned = false
         }
     }

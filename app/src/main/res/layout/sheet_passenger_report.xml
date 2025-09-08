@@ -1,12 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content">
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="16dp">
+        android:padding="20dp">
 
         <TextView
             android:layout_width="match_parent"
@@ -15,14 +16,71 @@
             android:textStyle="bold"
             android:paddingBottom="8dp" />
 
-        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Hazard type" />
-        <Spinner android:id="@+id/spn_type" android:layout_width="match_parent" android:layout_height="wrap_content" />
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Select hazard type"/>
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_type_bump_p"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="64dp"
+            android:text="Speed bump"
+            app:icon="@drawable/ic_marker_bump"
+            app:iconGravity="textStart"
+            app:iconPadding="12dp"/>
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_type_pothole_p"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="64dp"
+            android:text="Pothole"
+            style="?attr/materialButtonOutlinedStyle"
+            app:icon="@drawable/ic_marker_pothole"
+            app:iconGravity="textStart"
+            app:iconPadding="12dp"/>
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_type_rumble_p"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="64dp"
+            android:text="Rumble strip"
+            style="?attr/materialButtonOutlinedStyle"
+            app:icon="@drawable/ic_marker_rumble"
+            app:iconGravity="textStart"
+            app:iconPadding="12dp"/>
 
-        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Lane side" android:paddingTop="8dp" />
-        <Spinner android:id="@+id/spn_lane" android:layout_width="match_parent" android:layout_height="wrap_content" />
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Lane side" android:paddingTop="8dp"/>
+        <com.google.android.material.button.MaterialButtonToggleGroup
+            android:id="@+id/toggle_lane"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            app:singleSelection="true">
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_lane_left"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="LEFT"/>
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_lane_center"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="CENTER"/>
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_lane_right"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="RIGHT"/>
+        </com.google.android.material.button.MaterialButtonToggleGroup>
 
-        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Notes (optional)" android:paddingTop="8dp" />
-        <EditText android:id="@+id/edt_notes" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="48dp" android:hint="Describe details" />
+        <CheckBox
+            android:id="@+id/chk_both_directions"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Affects both directions"
+            android:paddingTop="8dp"/>
+
+        <!-- Notes removed per request -->
 
         <!-- Speed limit zone extras -->
         <LinearLayout android:id="@+id/zone_block" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingTop="8dp" android:visibility="gone">
@@ -36,8 +94,16 @@
             <TextView android:id="@+id/txt_zone_status" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Start: —   End: —" android:paddingTop="4dp"/>
         </LinearLayout>
 
-        <Button android:id="@+id/btn_submit" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:text="Submit" />
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_submit"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:minHeight="56dp"
+            android:textSize="16sp"
+            style="?attr/materialButtonStyle"
+            android:text="Submit" />
 
-        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Photo (optional): Not captured in this build" android:textColor="#666" android:paddingTop="8dp" />
+        <!-- Removed photo text: feature not implemented -->
     </LinearLayout>
 </ScrollView>

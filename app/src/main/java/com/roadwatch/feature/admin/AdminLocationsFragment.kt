@@ -25,7 +25,16 @@ class AdminLocationsFragment : Fragment() {
         val store = HazardStore(requireContext())
 
         val isAdmin = com.roadwatch.app.BuildConfig.IS_ADMIN
-        data class Row(val label: String, val isUser: Boolean, val userId: String?, val seedKey: String?, val active: Boolean, val votes: Int, val bearingSide: String, val directionality: String)
+        data class Row(
+            val label: String,
+            val isUser: Boolean,
+            val userId: String?,
+            val seedKey: String?,
+            val voteKey: String,
+            val active: Boolean,
+            val votes: Int,
+            val directionality: String,
+        )
 
         fun refresh() {
             val seedHazards = repo.loadSeeds().second
@@ -38,16 +47,51 @@ class AdminLocationsFragment : Fragment() {
                 val active = h.active
                 val votes = CommunityVotes.getVotes(requireContext(), key)
                 val createdAt = try { h.createdAt.toString() } catch (_: Exception) { "" }
-                rows += Row(label = buildLabel(h.type.name, active, votes, createdAt, h.bearingSide, h.directionality), isUser = false, userId = null, seedKey = key, active = active, votes = votes, bearingSide = h.bearingSide, directionality = h.directionality)
+                rows += Row(
+                    label = buildLabel(h.type.name, active, votes, createdAt, h.directionality),
+                    isUser = false,
+                    userId = null,
+                    seedKey = key,
+                    voteKey = key,
+                    active = active,
+                    votes = votes,
+                    directionality = h.directionality,
+                )
             }
             userHazards.forEach { u ->
-                val key = SeedOverrides.keyOf(u.hazard)
-                val votes = CommunityVotes.getVotes(requireContext(), key)
+                val voteKey = SeedOverrides.keyOf(u.hazard)
+                val votes = CommunityVotes.getVotes(requireContext(), voteKey)
                 val createdAt = try { u.hazard.createdAt.toString() } catch (_: Exception) { "" }
-                rows += Row(label = buildLabel(u.hazard.type.name, u.hazard.active, votes, createdAt, u.hazard.bearingSide, u.hazard.directionality), isUser = true, userId = u.id, seedKey = null, active = u.hazard.active, votes = votes, bearingSide = u.hazard.bearingSide, directionality = u.hazard.directionality)
+                rows += Row(
+                    label = buildLabel(u.hazard.type.name, u.hazard.active, votes, createdAt, u.hazard.directionality),
+                    isUser = true,
+                    userId = u.id,
+                    seedKey = null,
+                    voteKey = voteKey,
+                    active = u.hazard.active,
+                    votes = votes,
+                    directionality = u.hazard.directionality,
+                )
             }
-            // Summary
+            // Summary and list rendering
             val total = rows.size
+            if (total == 0) {
+                summaryBody?.text = "No hazards"
+                list.adapter = object : BaseAdapter() {
+                    override fun getCount() = 1
+                    override fun getItem(position: Int) = "No hazards"
+                    override fun getItemId(position: Int) = 0L
+                    override fun getView(position: Int, convertView: View?, parent: ViewGroup?): View {
+                        val tv = (convertView as? TextView) ?: TextView(requireContext())
+                        tv.text = "No hazards"
+                        tv.setPadding(24, 24, 24, 24)
+                        return tv
+                    }
+                }
+                list.setOnItemClickListener(null)
+                return
+            }
+
             val activeCount = rows.count { it.active }
             val byType = (seedHazards.map { it.type.name } + userHazards.map { it.hazard.type.name })
                 .groupingBy { it }
@@ -63,20 +107,43 @@ class AdminLocationsFragment : Fragment() {
                     val row = rows[position]
                     val container = convertView as? LinearLayout ?: LinearLayout(ctx).apply {
                         orientation = LinearLayout.HORIZONTAL
-                        setPadding(16, 12, 16, 12)
-                        addView(ImageView(ctx).apply { id = android.R.id.icon; layoutParams = LinearLayout.LayoutParams(32,32) })
-                        addView(TextView(ctx).apply { id = android.R.id.text1; layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f) })
+                        setPadding(20, 14, 20, 14)
+                        val iconSize = (ctx.resources.displayMetrics.density * 20).toInt()
+                        addView(ImageView(ctx).apply {
+                            id = android.R.id.icon
+                            layoutParams = LinearLayout.LayoutParams(iconSize, iconSize).apply { setMargins(0, 6, 16, 0) }
+                        })
+                        val textWrap = LinearLayout(ctx).apply {
+                            orientation = LinearLayout.VERTICAL
+                            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                        }
+                        textWrap.addView(TextView(ctx).apply { id = android.R.id.text1 })
+                        textWrap.addView(TextView(ctx).apply { id = android.R.id.text2 })
+                        addView(textWrap)
                     }
                     val icon = container.findViewById<ImageView>(android.R.id.icon)
                     icon.setImageResource(R.drawable.ic_hazard)
                     icon.setColorFilter(if (row.active) android.graphics.Color.parseColor("#1DB954") else android.graphics.Color.parseColor("#E63946"))
-                    container.findViewById<TextView>(android.R.id.text1).text = row.label
+
+                    val parts = row.label.split('\n')
+                    val title = parts.getOrNull(0) ?: row.label
+                    val subtitle = parts.getOrNull(1) ?: ""
+                    container.findViewById<TextView>(android.R.id.text1).apply {
+                        text = title
+                        textSize = 16f
+                        setTextColor(android.graphics.Color.parseColor("#212121"))
+                    }
+                    container.findViewById<TextView>(android.R.id.text2).apply {
+                        text = subtitle
+                        textSize = 13f
+                        setTextColor(android.graphics.Color.parseColor("#666666"))
+                    }
                     return container
                 }
             }
             list.setOnItemClickListener { _, _, pos, _ ->
                 val row = rows[pos]
-                val key = row.seedKey ?: row.userId ?: ""
+                val key = row.voteKey
                 val voted = CommunityVotes.hasVoted(requireContext(), key)
                 val voteAction = if (voted) "Remove Vote" else "Add Vote"
                 val actions = when {
@@ -115,10 +182,19 @@ class AdminLocationsFragment : Fragment() {
         refresh()
     }
 
-    private fun buildLabel(type: String, active: Boolean, votes: Int, created: String, bearingSide: String, directionality: String): String {
+    private fun buildLabel(type: String, active: Boolean, votes: Int, created: String, directionality: String): String {
         val instant = try { java.time.Instant.parse(created) } catch (_: Exception) { java.time.Instant.EPOCH }
-        val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").withZone(ZoneId.of("Africa/Nairobi"))
+        val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(ZoneId.systemDefault())
         val formattedDate = formatter.format(instant)
-        return "$type • ${if (active) "Active" else "Inactive"} • votes: $votes • $formattedDate\nBearing: $bearingSide, Direction: $directionality"
+        val niceType = type.lowercase().replace('_',' ').replaceFirstChar { it.uppercase() }
+        val status = if (active) "Active" else "Inactive"
+        val niceDir = when (directionality.uppercase()) {
+            "ONE_WAY" -> "One-way"
+            "BIDIRECTIONAL" -> "Two-way"
+            else -> "Unknown"
+        }
+        val top = "$niceType • $status • votes: $votes"
+        val bottom = "Road: $niceDir • $formattedDate"
+        return "$top\n$bottom"
     }
 }

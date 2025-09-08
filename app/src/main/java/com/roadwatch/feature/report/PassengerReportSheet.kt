@@ -24,29 +24,27 @@ class PassengerReportSheet : BottomSheetDialogFragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-        val spnType = view.findViewById<Spinner>(R.id.spn_type)
-        val spnLane = view.findViewById<Spinner>(R.id.spn_lane)
-        val edtNotes = view.findViewById<EditText>(R.id.edt_notes)
+        val btnBump = view.findViewById<Button>(R.id.btn_type_bump_p)
+        val btnPothole = view.findViewById<Button>(R.id.btn_type_pothole_p)
+        val btnRumble = view.findViewById<Button>(R.id.btn_type_rumble_p)
+        val toggleLane = view.findViewById<com.google.android.material.button.MaterialButtonToggleGroup>(R.id.toggle_lane)
         val btnSubmit = view.findViewById<Button>(R.id.btn_submit)
         val zoneBlock = view.findViewById<LinearLayout>(R.id.zone_block)
         val edtSpeed = view.findViewById<EditText>(R.id.edt_speed_kph)
         val btnStart = view.findViewById<Button>(R.id.btn_set_start)
         val btnEnd = view.findViewById<Button>(R.id.btn_set_end)
         val txtZoneStatus = view.findViewById<TextView>(R.id.txt_zone_status)
+        val chkBoth = view.findViewById<CheckBox>(R.id.chk_both_directions)
 
-        spnType.adapter = ArrayAdapter(requireContext(), android.R.layout.simple_spinner_dropdown_item, HazardType.entries.map { it.name })
-        spnLane.adapter = ArrayAdapter(requireContext(), android.R.layout.simple_spinner_dropdown_item, listOf("LEFT","RIGHT","CENTER","UNKNOWN"))
+        var selectedType: HazardType = HazardType.SPEED_BUMP
+        btnBump.setOnClickListener { selectedType = HazardType.SPEED_BUMP }
+        btnPothole.setOnClickListener { selectedType = HazardType.POTHOLE }
+        btnRumble.setOnClickListener { selectedType = HazardType.RUMBLE_STRIP }
 
         var start: android.location.Location? = null
         var end: android.location.Location? = null
 
-        spnType.onItemSelectedListener = object: AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>, view: View?, position: Int, id: Long) {
-                val type = HazardType.valueOf(spnType.selectedItem as String)
-                zoneBlock.visibility = if (type == HazardType.SPEED_LIMIT_ZONE) View.VISIBLE else View.GONE
-            }
-            override fun onNothingSelected(parent: AdapterView<*>) {}
-        }
+        // All three types are spot hazards; keep zone UI hidden by default
 
         fun currentLoc(): android.location.Location? {
             val lm = requireContext().getSystemService(android.content.Context.LOCATION_SERVICE) as android.location.LocationManager
@@ -71,39 +69,65 @@ class PassengerReportSheet : BottomSheetDialogFragment() {
         }
 
         btnSubmit.setOnClickListener {
-            val type = HazardType.valueOf(spnType.selectedItem as String)
-            val lane = spnLane.selectedItem as String
-            val notes = edtNotes.text?.toString()?.trim().orEmpty()
+            val type = selectedType
             val loc = lastKnown()
-            if (loc == null) {
-                Toast.makeText(requireContext(), "Location unavailable", Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
-            }
+            if (loc == null) { com.roadwatch.ui.UiAlerts.error(view, "Location unavailable"); return@setOnClickListener }
             fun defaultDirectionality(t: HazardType): String = when (t) {
-                HazardType.SPEED_BUMP, HazardType.POTHOLE, HazardType.RUMBLE_STRIP, HazardType.SPEED_LIMIT_ZONE -> "BIDIRECTIONAL"
+                HazardType.SPEED_LIMIT_ZONE -> "BIDIRECTIONAL"
+                else -> "ONE_WAY"
             }
             var h = Hazard(
                 type = type,
                 lat = loc.latitude,
                 lng = loc.longitude,
                 active = true,
-                bearingSide = lane,
-                directionality = defaultDirectionality(type),
+                directionality = if (chkBoth.isChecked) "BIDIRECTIONAL" else defaultDirectionality(type),
                 source = "USER",
                 createdAt = Instant.now()
             )
             if (type == HazardType.SPEED_LIMIT_ZONE) {
                 val kph = edtSpeed.text.toString().toIntOrNull()
                 val length = if (start != null && end != null) distance(start!!, end!!).toInt() else null
-                h = h.copy(speedLimitKph = kph, zoneLengthMeters = length)
+                if (start == null || end == null) {
+                    Toast.makeText(requireContext(), "Set start and end of zone", Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
+                }
+                if (length != null && length < 100) {
+                    Toast.makeText(requireContext(), "Zone too short (min 100m)", Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
+                }
+                h = h.copy(
+                    speedLimitKph = kph,
+                    zoneLengthMeters = length,
+                    zoneStartLat = start?.latitude,
+                    zoneStartLng = start?.longitude,
+                    zoneEndLat = end?.latitude,
+                    zoneEndLng = end?.longitude,
+                )
             }
             val result = SeedRepository(requireContext()).addUserHazardWithDedup(h)
             when (result) {
-                com.roadwatch.data.SeedRepository.AddResult.ADDED -> Toast.makeText(requireContext(), "Reported ${type.name}", Toast.LENGTH_SHORT).show()
-                com.roadwatch.data.SeedRepository.AddResult.DUPLICATE_NEARBY -> Toast.makeText(requireContext(), "Similar ${type.name.lowercase().replace('_',' ')} within 30 m", Toast.LENGTH_SHORT).show()
-                else -> Toast.makeText(requireContext(), "Report failed", Toast.LENGTH_SHORT).show()
+                com.roadwatch.data.SeedRepository.AddResult.ADDED -> {
+                    com.roadwatch.ui.UiAlerts.success(view, "Reported ${type.name}")
+                    if (com.roadwatch.prefs.AppPrefs.isHapticsEnabled(requireContext())) {
+                        try { com.roadwatch.core.util.Haptics.tap(requireContext()) } catch (_: Exception) {}
+                    }
+                }
+                com.roadwatch.data.SeedRepository.AddResult.DUPLICATE_NEARBY -> com.roadwatch.ui.UiAlerts.warn(view, "Similar ${type.name.lowercase().replace('_',' ')} within 30 m")
+                else -> com.roadwatch.ui.UiAlerts.error(view, "Report failed")
             }
             dismissAllowingStateLoss()
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Defensive: if this were ever opened and location is unavailable, close it
+        val hasFine = requireContext().checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val lm = requireContext().getSystemService(android.content.Context.LOCATION_SERVICE) as LocationManager
+        val enabled = lm.isProviderEnabled(LocationManager.GPS_PROVIDER) || lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+        if (!hasFine || !enabled) {
+            try { dismissAllowingStateLoss() } catch (_: Exception) {}
         }
     }
 

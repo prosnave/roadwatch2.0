@@ -20,13 +20,13 @@ class SeedRepository(private val context: Context) {
                     val idxType = cols.indexOf("type")
                     val idxLat = cols.indexOf("lat")
                     var idxLng = cols.indexOf("lng").let { if (it == -1) cols.indexOf("lon") else it }
-                    val idxBearingSide = cols.indexOf("bearingside")
                     val idxDirectionality = cols.indexOf("directionality")
                     val idxSpeedKph = cols.indexOf("speedlimitkph")
                     val idxZoneLen = cols.indexOf("zonelengthmeters")
 
                     fun defaultDirectionality(t: HazardType): String = when (t) {
-                        HazardType.SPEED_BUMP, HazardType.POTHOLE, HazardType.RUMBLE_STRIP, HazardType.SPEED_LIMIT_ZONE -> "BIDIRECTIONAL"
+                        HazardType.SPEED_LIMIT_ZONE -> "BIDIRECTIONAL"
+                        else -> "ONE_WAY"
                     }
 
                     var line: String?
@@ -39,7 +39,6 @@ class SeedRepository(private val context: Context) {
                             val type = HazardType.fromString(typeStr) ?: continue
                             val lat = parts.getOrNull(idxLat)?.toDoubleOrNull() ?: continue
                             val lng = parts.getOrNull(idxLng)?.toDoubleOrNull() ?: continue
-                            val bearingSide = if (idxBearingSide >= 0) parts.getOrNull(idxBearingSide).orEmpty().ifBlank { "CENTER" } else "CENTER"
                             val directionality = if (idxDirectionality >= 0) parts.getOrNull(idxDirectionality).orEmpty().ifBlank { defaultDirectionality(type) } else defaultDirectionality(type)
                             val speedKph = if (idxSpeedKph >= 0) parts.getOrNull(idxSpeedKph)?.toIntOrNull() else null
                             val zoneLen = if (idxZoneLen >= 0) parts.getOrNull(idxZoneLen)?.toIntOrNull() else null
@@ -47,7 +46,6 @@ class SeedRepository(private val context: Context) {
                                 type = type,
                                 lat = lat,
                                 lng = lng,
-                                bearingSide = bearingSide,
                                 directionality = directionality,
                                 speedLimitKph = speedKph,
                                 zoneLengthMeters = zoneLen,

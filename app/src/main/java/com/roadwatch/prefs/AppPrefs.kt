@@ -17,6 +17,12 @@ object AppPrefs {
     private const val KEY_DEFAULT_MUTE_MIN = "default_mute_min"
     private const val KEY_CLUSTER_ENABLED = "cluster_enabled"
     private const val KEY_CLUSTER_SPEED_KPH = "cluster_speed_kph"
+    private const val KEY_HAPTICS_ENABLED = "haptics_enabled"
+    private const val KEY_AUTO_RESUME = "auto_resume_enabled"
+    private const val KEY_LAST_AUTOSTOP_LAT = "last_autostop_lat"
+    private const val KEY_LAST_AUTOSTOP_LNG = "last_autostop_lng"
+    private const val KEY_LAST_AUTOSTOP_AT = "last_autostop_at"
+    private const val KEY_LAST_DND_PROMPT_AT = "last_dnd_prompt_at"
 
     fun setMutedForMinutes(context: Context, minutes: Int) {
         val until = System.currentTimeMillis() + minutes * 60_000L
@@ -129,4 +135,62 @@ object AppPrefs {
     fun getClusterSpeedThreshold(context: Context): Int =
         context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
             .getInt(KEY_CLUSTER_SPEED_KPH, 50)
+
+    // Haptics
+    fun setHapticsEnabled(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .edit().putBoolean(KEY_HAPTICS_ENABLED, enabled).apply()
+    }
+    fun isHapticsEnabled(context: Context): Boolean =
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .getBoolean(KEY_HAPTICS_ENABLED, true)
+
+    // Auto-resume Drive Mode
+    fun setAutoResumeEnabled(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .edit().putBoolean(KEY_AUTO_RESUME, enabled).apply()
+    }
+    fun isAutoResumeEnabled(context: Context): Boolean =
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .getBoolean(KEY_AUTO_RESUME, true)
+
+    fun recordAutoStop(context: Context, lat: Double, lng: Double) {
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .edit()
+            .putFloat(KEY_LAST_AUTOSTOP_LAT, lat.toFloat())
+            .putFloat(KEY_LAST_AUTOSTOP_LNG, lng.toFloat())
+            .putLong(KEY_LAST_AUTOSTOP_AT, System.currentTimeMillis())
+            .apply()
+    }
+    fun clearAutoStop(context: Context) {
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .edit()
+            .remove(KEY_LAST_AUTOSTOP_LAT)
+            .remove(KEY_LAST_AUTOSTOP_LNG)
+            .remove(KEY_LAST_AUTOSTOP_AT)
+            .apply()
+    }
+    fun getLastAutoStopLat(context: Context): Double? {
+        val prefs = context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+        if (!prefs.contains(KEY_LAST_AUTOSTOP_LAT)) return null
+        return prefs.getFloat(KEY_LAST_AUTOSTOP_LAT, 0f).toDouble()
+    }
+    fun getLastAutoStopLng(context: Context): Double? {
+        val prefs = context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+        if (!prefs.contains(KEY_LAST_AUTOSTOP_LNG)) return null
+        return prefs.getFloat(KEY_LAST_AUTOSTOP_LNG, 0f).toDouble()
+    }
+    fun getLastAutoStopAt(context: Context): Long? {
+        val prefs = context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+        if (!prefs.contains(KEY_LAST_AUTOSTOP_AT)) return null
+        return prefs.getLong(KEY_LAST_AUTOSTOP_AT, 0L)
+    }
+
+    fun setLastDndPromptAt(context: Context, whenMs: Long = System.currentTimeMillis()) {
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .edit().putLong(KEY_LAST_DND_PROMPT_AT, whenMs).apply()
+    }
+    fun getLastDndPromptAt(context: Context): Long =
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .getLong(KEY_LAST_DND_PROMPT_AT, 0L)
 }

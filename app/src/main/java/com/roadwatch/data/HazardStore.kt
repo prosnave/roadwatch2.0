@@ -13,7 +13,7 @@ class HazardStore(private val context: Context) {
     init {
         if (!file.exists()) {
             file.parentFile?.mkdirs()
-            file.writeText("id,type,lat,lng,active,bearingSide,directionality,source,createdAt\n")
+            file.writeText("id,type,lat,lng,active,directionality,source,createdAt,speedLimitKph,zoneLengthMeters,zoneStartLat,zoneStartLng,zoneEndLat,zoneEndLng\n")
         }
     }
 
@@ -27,10 +27,15 @@ class HazardStore(private val context: Context) {
                 h.lat.toString(),
                 h.lng.toString(),
                 h.active.toString(),
-                h.bearingSide,
                 h.directionality,
                 h.source,
-                createdAt
+                createdAt,
+                h.speedLimitKph?.toString().orEmpty(),
+                h.zoneLengthMeters?.toString().orEmpty(),
+                h.zoneStartLat?.toString().orEmpty(),
+                h.zoneStartLng?.toString().orEmpty(),
+                h.zoneEndLat?.toString().orEmpty(),
+                h.zoneEndLng?.toString().orEmpty()
             ).joinToString(",")
             file.appendText(line + "\n")
             true
@@ -46,7 +51,7 @@ class HazardStore(private val context: Context) {
         file.forEachLine { raw ->
             if (raw.startsWith("id,")) return@forEachLine
             val parts = raw.split(',')
-            if (parts.size < 9) return@forEachLine
+            if (parts.size < 8) return@forEachLine
             try {
                 result += UserHazard(
                     id = parts[0],
@@ -55,10 +60,15 @@ class HazardStore(private val context: Context) {
                         lat = parts[2].toDouble(),
                         lng = parts[3].toDouble(),
                         active = parts[4].toBooleanStrictOrNull() ?: true,
-                        bearingSide = parts[5],
-                        directionality = parts[6],
-                        source = parts[7],
-                        createdAt = Instant.parse(parts[8])
+                        directionality = parts[5],
+                        source = parts[6],
+                        createdAt = Instant.parse(parts[7]),
+                        speedLimitKph = parts.getOrNull(8)?.toIntOrNull(),
+                        zoneLengthMeters = parts.getOrNull(9)?.toIntOrNull(),
+                        zoneStartLat = parts.getOrNull(10)?.toDoubleOrNull(),
+                        zoneStartLng = parts.getOrNull(11)?.toDoubleOrNull(),
+                        zoneEndLat = parts.getOrNull(12)?.toDoubleOrNull(),
+                        zoneEndLng = parts.getOrNull(13)?.toDoubleOrNull(),
                     )
                 )
             } catch (_: Exception) {
@@ -94,7 +104,7 @@ class HazardStore(private val context: Context) {
 
     private fun writeAll(items: List<UserHazard>): Boolean {
         return try {
-            file.writeText("id,type,lat,lng,active,bearingSide,directionality,source,createdAt\n")
+            file.writeText("id,type,lat,lng,active,directionality,source,createdAt,speedLimitKph,zoneLengthMeters,zoneStartLat,zoneStartLng,zoneEndLat,zoneEndLng\n")
             items.forEach { u ->
                 val h = u.hazard
                 val createdAt = DateTimeFormatter.ISO_INSTANT.format(h.createdAt)
@@ -104,10 +114,15 @@ class HazardStore(private val context: Context) {
                     h.lat.toString(),
                     h.lng.toString(),
                     h.active.toString(),
-                    h.bearingSide,
                     h.directionality,
                     h.source,
-                    createdAt
+                    createdAt,
+                    h.speedLimitKph?.toString().orEmpty(),
+                    h.zoneLengthMeters?.toString().orEmpty(),
+                    h.zoneStartLat?.toString().orEmpty(),
+                    h.zoneStartLng?.toString().orEmpty(),
+                    h.zoneEndLat?.toString().orEmpty(),
+                    h.zoneEndLng?.toString().orEmpty()
                 ).joinToString(",")
                 file.appendText(line + "\n")
             }

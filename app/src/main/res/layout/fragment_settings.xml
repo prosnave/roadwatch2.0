@@ -32,7 +32,7 @@
             android:textSize="18sp"
             android:paddingBottom="8dp" />
 
-        <!-- Primary actions -->
+        <!-- Data & Privacy -->
         <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -42,6 +42,8 @@
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
                 android:padding="12dp">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Data &amp; Privacy" android:textStyle="bold" android:paddingBottom="4dp"/>
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Export or import your local hazards and manage data privacy." android:textColor="#666" android:textSize="13sp" android:paddingBottom="8dp"/>
                 <Button android:id="@+id/btn_reload" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/reload_seed_hazards" />
                 <Button android:id="@+id/btn_test_alert" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/test_alert" android:layout_marginTop="8dp" />
                 <Button android:id="@+id/btn_export" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/export_hazards" android:layout_marginTop="8dp" />
@@ -49,19 +51,11 @@
                 <Button android:id="@+id/btn_import" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/import_hazards" android:layout_marginTop="8dp" />
                 <Button android:id="@+id/btn_admin" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Manage Locations" android:layout_marginTop="8dp" />
                 <Button android:id="@+id/btn_reset_data" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Reset Local Data" android:layout_marginTop="8dp" />
-                
 
-                <!-- Clustering controls -->
-                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Alert Clustering" android:textStyle="bold" android:layout_marginTop="12dp" />
-                <Switch android:id="@+id/switch_cluster_enabled" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Enable clustering at speed" />
-                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginTop="6dp">
-                    <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Cluster speed threshold (kph)" />
-                    <EditText android:id="@+id/edt_cluster_speed" android:layout_width="96dp" android:layout_height="wrap_content" android:inputType="number" android:hint="50" />
-                </LinearLayout>
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
-        <!-- Alert & background settings -->
+        <!-- Alerts -->
         <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -69,36 +63,56 @@
             <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="12dp">
                 <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Alerts" android:textStyle="bold"/>
                 <Switch android:id="@+id/switch_bg_alerts" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Enable background alerts" android:layout_marginTop="6dp" />
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Alerts continue when app is minimized or screen is off." android:textColor="#666" android:textSize="12sp"/>
                 <Switch android:id="@+id/switch_audio" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Audio alerts" android:layout_marginTop="6dp" />
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Voice guidance over speaker or Bluetooth." android:textColor="#666" android:textSize="12sp"/>
                 <Switch android:id="@+id/switch_visual" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Visual alerts" android:layout_marginTop="6dp" />
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Banner notifications for hazards and zones." android:textColor="#666" android:textSize="12sp"/>
+                <Switch android:id="@+id/switch_haptics" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Haptic feedback" android:layout_marginTop="6dp" />
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Light vibration on alert and report success." android:textColor="#666" android:textSize="12sp"/>
                 <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Default mute duration (minutes)" android:layout_marginTop="8dp" />
                 <EditText android:id="@+id/edt_mute_default" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="number" />
                 <Button android:id="@+id/btn_mute_default_save" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Save" android:layout_marginTop="6dp" />
+
+                <!-- Clustering controls -->
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Alert Clustering" android:textStyle="bold" android:layout_marginTop="12dp" />
+                <Switch android:id="@+id/switch_cluster_enabled" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Enable clustering at speed" />
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Combine nearby hazards into one concise callout at higher speeds." android:textColor="#666" android:textSize="12sp"/>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginTop="6dp">
+                    <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Cluster speed threshold (kph)" />
+                    <EditText android:id="@+id/edt_cluster_speed" android:layout_width="96dp" android:layout_height="wrap_content" android:inputType="number" android:hint="50" />
+                </LinearLayout>
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
-        <!-- Focus & passenger & curve -->
+        <!-- Driving -->
         <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="12dp">
             <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="12dp">
-                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Audio Focus" android:textStyle="bold"/>
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Driving" android:textStyle="bold"/>
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Audio Focus" android:layout_marginTop="6dp"/>
                 <Spinner android:id="@+id/spn_audio_focus" android:layout_width="match_parent" android:layout_height="wrap_content" />
-                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Passenger Mode" android:textStyle="bold" android:layout_marginTop="8dp"/>
-                <Switch android:id="@+id/switch_passenger" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Enable passenger reporting" />
-                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Speed Curve" android:textStyle="bold" android:layout_marginTop="8dp"/>
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="EXCLUSIVE pauses music during alerts; DUCK lowers volume." android:textColor="#666" android:textSize="12sp"/>
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Show passenger-friendly report options when not driving." android:textColor="#666" android:textSize="12sp"/>
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Speed Curve" android:layout_marginTop="12dp"/>
                 <Spinner android:id="@+id/spn_speed_curve" android:layout_width="match_parent" android:layout_height="wrap_content" />
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Conservative calls hazards earlier; Aggressive later." android:textColor="#666" android:textSize="12sp"/>
+                <Switch android:id="@+id/switch_auto_resume" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Offer auto-resume after stop" android:layout_marginTop="12dp" />
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Suggest resuming Drive Mode when you start moving again." android:textColor="#666" android:textSize="12sp"/>
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
-        <!-- Zone messages -->
+        <!-- Advanced -->
         <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="12dp">
             <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="12dp">
-                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Speed Limit Zones" android:textStyle="bold"/>
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Advanced" android:textStyle="bold"/>
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Speed Limit Zones" android:layout_marginTop="8dp"/>
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Customize spoken messages and repetition inside zones." android:textColor="#666" android:textSize="12sp"/>
                 <EditText android:id="@+id/edt_zone_enter" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Enter message" />
                 <EditText android:id="@+id/edt_zone_exit" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Exit message" />
                 <EditText android:id="@+id/edt_zone_repeat" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Repeat inside (ms)" android:inputType="number" />
