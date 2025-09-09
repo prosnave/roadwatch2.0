@@ -657,70 +657,69 @@ class DriveHudFragment : Fragment() {
     private fun openHazardEditor(h: com.roadwatch.data.Hazard) {
         val ctx = requireContext()
         val store = com.roadwatch.data.HazardStore(ctx)
-        val userList = store.list()
         val key = com.roadwatch.data.SeedOverrides.keyOf(h)
-        val userMatch = userList.find { com.roadwatch.data.SeedOverrides.keyOf(it.hazard) == key }
-        val isUser = userMatch != null
+        val userMatch = store.list().find { com.roadwatch.data.SeedOverrides.keyOf(it.hazard) == key }
 
-        // Build descriptive context so it's obvious which hazard was tapped
+        // If it's a user hazard, jump straight into the edit dialog.
+        if (userMatch != null) {
+            showEditDialog(userMatch)
+            return
+        }
+
+        // For seed hazards, provide quick edit affordances: hide/show or create an editable copy.
+        val isActive = h.active && !com.roadwatch.data.SeedOverrides.isDisabled(ctx, key)
+        val toggleLabel = if (isActive) "Hide (Mark Inactive)" else "Show (Mark Active)"
         val niceType = h.type.name.lowercase().replace('_',' ').replaceFirstChar { it.uppercase() }
-        val niceDir = when (h.directionality.uppercase()) {
-            "ONE_WAY" -> "One-way"
-            "BIDIRECTIONAL" -> "Two-way"
-            "OPPOSITE" -> "Opposite"
-            else -> "Unknown"
-        }
-        val status = if ((userMatch?.hazard?.active ?: h.active)) "Active" else "Inactive"
-        val msg = StringBuilder().apply {
-            // Type is now shown in the dialog title; omit from body
-            append("Status: ").append(status).append('\n')
-            append("Direction: ").append(niceDir).append('\n')
-            append("Location: ")
-                .append(String.format(java.util.Locale.US, "%.5f, %.5f", h.lat, h.lng))
-        }.toString()
-
-        val actions = mutableListOf<String>()
-        actions += if ((userMatch?.hazard?.active ?: h.active)) "Mark Inactive" else "Mark Active"
-        if (isUser) {
-            actions += "Edit"
-            actions += "Delete"
-        }
-        val arr = actions.toTypedArray()
 
         android.app.AlertDialog.Builder(ctx)
             .setTitle("Manage: $niceType")
-            .setMessage(msg)
-            .setItems(arr) { d, which ->
-                when (arr[which]) {
-                    "Mark Inactive" -> {
-                        if (isUser) {
-                            store.toggleActive(userMatch!!.id)
-                        } else {
-                            com.roadwatch.data.SeedOverrides.setDisabled(ctx, key, true)
-                        }
-                        notifyRefresh()
-                    }
-                    "Mark Active" -> {
-                        if (isUser) {
-                            store.toggleActive(userMatch!!.id)
-                        } else {
-                            com.roadwatch.data.SeedOverrides.setDisabled(ctx, key, false)
-                        }
-                        notifyRefresh()
-                    }
-                    "Delete" -> {
-                        if (isUser) {
-                            store.delete(userMatch!!.id)
-                            notifyRefresh()
-                        }
-                    }
-                    "Edit" -> {
-                        if (isUser) showEditDialog(userMatch!!) else com.roadwatch.ui.UiAlerts.info(view, "Seed hazards cannot change type; you can hide/show them.")
-                    }
+            .setMessage(
+                "This is a seed hazard. You can hide/show it, or make an editable copy to change type or move the pin."
+            )
+            .setPositiveButton(toggleLabel) { _, _ ->
+                com.roadwatch.data.SeedOverrides.setDisabled(ctx, key, isActive)
+                notifyRefresh()
+            }
+            .setNeutralButton("Make Editable Copy") { _, _ ->
+                val created = createEditableCopyFromSeed(h)
+                if (created != null) {
+                    showEditDialog(created)
+                } else {
+                    com.roadwatch.ui.UiAlerts.error(view, "Could not create editable copy")
                 }
             }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    private fun createEditableCopyFromSeed(h: com.roadwatch.data.Hazard): com.roadwatch.data.UserHazard? {
+        val ctx = requireContext()
+        val store = com.roadwatch.data.HazardStore(ctx)
+        val copy = com.roadwatch.data.Hazard(
+            type = h.type,
+            lat = h.lat,
+            lng = h.lng,
+            directionality = when (h.directionality.uppercase()) {
+                "BIDIRECTIONAL" -> "BIDIRECTIONAL"
+                else -> "ONE_WAY"
+            },
+            reportedHeadingDeg = 0.0f,
+            userBearing = null,
+            active = true,
+            source = "USER",
+            createdAt = java.time.Instant.now(),
+            speedLimitKph = h.speedLimitKph,
+            zoneLengthMeters = h.zoneLengthMeters,
+            zoneStartLat = h.zoneStartLat,
+            zoneStartLng = h.zoneStartLng,
+            zoneEndLat = h.zoneEndLat,
+            zoneEndLng = h.zoneEndLng,
+        )
+        return if (store.add(copy)) {
+            // Find the newly added user hazard by matching key and source
+            val key = com.roadwatch.data.SeedOverrides.keyOf(copy)
+            store.list().find { it.hazard.source == "USER" && com.roadwatch.data.SeedOverrides.keyOf(it.hazard) == key }
+        } else null
     }
 
     private fun showEditDialog(u: com.roadwatch.data.UserHazard) {
