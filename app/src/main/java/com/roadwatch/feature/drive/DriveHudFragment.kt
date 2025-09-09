@@ -120,6 +120,17 @@ class DriveHudFragment : Fragment() {
                 gMap.setPadding(dp(16), top, dp(16), bottom)
             }
             refreshMarkers()
+
+            // Open editor when a hazard marker is tapped
+            gMap.setOnMarkerClickListener { marker ->
+                val tag = marker.tag
+                if (tag is com.roadwatch.data.Hazard) {
+                    openHazardEditor(tag)
+                    true
+                } else {
+                    false
+                }
+            }
         }
 
         // Controls
@@ -634,11 +645,148 @@ class DriveHudFragment : Fragment() {
                     }
                     val scale = 1.0f + (getVotesFor(h) / 10.0f)
                     val icon = vectorToBitmapDescriptor(iconRes, scale)
-                    map.addMarker(
+                    val m = map.addMarker(
                         MarkerOptions().position(LatLng(h.lat, h.lng)).title(h.type.name).icon(icon)
                     )
+                    m?.tag = h
                 }
             }
         }
+    }
+
+    private fun openHazardEditor(h: com.roadwatch.data.Hazard) {
+        val ctx = requireContext()
+        val store = com.roadwatch.data.HazardStore(ctx)
+        val userList = store.list()
+        val key = com.roadwatch.data.SeedOverrides.keyOf(h)
+        val userMatch = userList.find { com.roadwatch.data.SeedOverrides.keyOf(it.hazard) == key }
+        val isUser = userMatch != null
+
+        // Build descriptive context so it's obvious which hazard was tapped
+        val niceType = h.type.name.lowercase().replace('_',' ').replaceFirstChar { it.uppercase() }
+        val niceDir = when (h.directionality.uppercase()) {
+            "ONE_WAY" -> "One-way"
+            "BIDIRECTIONAL" -> "Two-way"
+            "OPPOSITE" -> "Opposite"
+            else -> "Unknown"
+        }
+        val status = if ((userMatch?.hazard?.active ?: h.active)) "Active" else "Inactive"
+        val msg = StringBuilder().apply {
+            // Type is now shown in the dialog title; omit from body
+            append("Status: ").append(status).append('\n')
+            append("Direction: ").append(niceDir).append('\n')
+            append("Location: ")
+                .append(String.format(java.util.Locale.US, "%.5f, %.5f", h.lat, h.lng))
+        }.toString()
+
+        val actions = mutableListOf<String>()
+        actions += if ((userMatch?.hazard?.active ?: h.active)) "Mark Inactive" else "Mark Active"
+        if (isUser) {
+            actions += "Edit"
+            actions += "Delete"
+        }
+        val arr = actions.toTypedArray()
+
+        android.app.AlertDialog.Builder(ctx)
+            .setTitle("Manage: $niceType")
+            .setMessage(msg)
+            .setItems(arr) { d, which ->
+                when (arr[which]) {
+                    "Mark Inactive" -> {
+                        if (isUser) {
+                            store.toggleActive(userMatch!!.id)
+                        } else {
+                            com.roadwatch.data.SeedOverrides.setDisabled(ctx, key, true)
+                        }
+                        notifyRefresh()
+                    }
+                    "Mark Active" -> {
+                        if (isUser) {
+                            store.toggleActive(userMatch!!.id)
+                        } else {
+                            com.roadwatch.data.SeedOverrides.setDisabled(ctx, key, false)
+                        }
+                        notifyRefresh()
+                    }
+                    "Delete" -> {
+                        if (isUser) {
+                            store.delete(userMatch!!.id)
+                            notifyRefresh()
+                        }
+                    }
+                    "Edit" -> {
+                        if (isUser) showEditDialog(userMatch!!) else com.roadwatch.ui.UiAlerts.info(view, "Seed hazards cannot change type; you can hide/show them.")
+                    }
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun showEditDialog(u: com.roadwatch.data.UserHazard) {
+        val ctx = requireContext()
+        val store = com.roadwatch.data.HazardStore(ctx)
+        val dialogView = layoutInflater.inflate(com.roadwatch.app.R.layout.dialog_edit_hazard, null)
+        val radioGroup = dialogView.findViewById<android.widget.RadioGroup>(com.roadwatch.app.R.id.radio_group_directionality)
+        val spinner = dialogView.findViewById<android.widget.Spinner>(com.roadwatch.app.R.id.spinner_hazard_type)
+
+        val hazardTypes = com.roadwatch.data.HazardType.values().filter { it != com.roadwatch.data.HazardType.SPEED_LIMIT_ZONE }.map { it.name }
+        val adapter = android.widget.ArrayAdapter(ctx, android.R.layout.simple_spinner_dropdown_item, hazardTypes)
+        spinner.adapter = adapter
+
+        spinner.setSelection(hazardTypes.indexOf(u.hazard.type.name))
+        when (u.hazard.directionality) {
+            "ONE_WAY" -> radioGroup.check(com.roadwatch.app.R.id.radio_one_way)
+            "BIDIRECTIONAL" -> radioGroup.check(com.roadwatch.app.R.id.radio_two_way)
+            else -> radioGroup.check(com.roadwatch.app.R.id.radio_one_way)
+        }
+
+        android.app.AlertDialog.Builder(ctx)
+            .setView(dialogView)
+            .setPositiveButton("Save") { _, _ ->
+                val newDirectionality = when (radioGroup.checkedRadioButtonId) {
+                    com.roadwatch.app.R.id.radio_one_way -> "ONE_WAY"
+                    com.roadwatch.app.R.id.radio_two_way -> "BIDIRECTIONAL"
+                    else -> u.hazard.directionality
+                }
+                val newType = com.roadwatch.data.HazardType.valueOf(spinner.selectedItem as String)
+                val updated = u.hazard.copy(directionality = newDirectionality, type = newType)
+                val originalKey = com.roadwatch.data.SeedOverrides.keyOf(u.hazard)
+                store.upsertByKey(originalKey, updated)
+                notifyRefresh()
+            }
+            .setNeutralButton("Move Pin") { _, _ ->
+                startMovePin(u)
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private var pendingMove: com.roadwatch.data.UserHazard? = null
+    private fun startMovePin(u: com.roadwatch.data.UserHazard) {
+        pendingMove = u
+        com.roadwatch.ui.UiAlerts.info(view, "Tap map to set new location for this hazard.")
+        googleMap?.setOnMapClickListener { latLng ->
+            finalizeMovePin(latLng)
+        }
+    }
+    private fun finalizeMovePin(latLng: com.google.android.gms.maps.model.LatLng) {
+        val u = pendingMove ?: return
+        val ctx = requireContext()
+        val store = com.roadwatch.data.HazardStore(ctx)
+        val originalKey = com.roadwatch.data.SeedOverrides.keyOf(u.hazard)
+        val updated = u.hazard.copy(lat = latLng.latitude, lng = latLng.longitude)
+        store.upsertByKey(originalKey, updated)
+        googleMap?.setOnMapClickListener(null)
+        pendingMove = null
+        notifyRefresh()
+        com.roadwatch.ui.UiAlerts.success(view, "Location updated")
+    }
+
+    private fun notifyRefresh() {
+        try {
+            val refreshIntent = android.content.Intent("com.roadwatch.REFRESH_HAZARDS")
+            requireContext().sendBroadcast(refreshIntent)
+        } catch (_: Exception) {}
     }
 }

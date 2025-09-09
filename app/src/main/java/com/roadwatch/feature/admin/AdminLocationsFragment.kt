@@ -187,7 +187,7 @@ class AdminLocationsFragment : Fragment() {
                                     when (it.directionality) {
                                         "ONE_WAY" -> radioGroup.check(R.id.radio_one_way)
                                         "BIDIRECTIONAL" -> radioGroup.check(R.id.radio_two_way)
-                                        "OPPOSITE" -> radioGroup.check(R.id.radio_opposite)
+                                        else -> radioGroup.check(R.id.radio_one_way)
                                     }
                                 }
 
@@ -197,7 +197,6 @@ class AdminLocationsFragment : Fragment() {
                                         val newDirectionality = when (radioGroup.checkedRadioButtonId) {
                                             R.id.radio_one_way -> "ONE_WAY"
                                             R.id.radio_two_way -> "BIDIRECTIONAL"
-                                            R.id.radio_opposite -> "OPPOSITE"
                                             else -> row.directionality
                                         }
                                         val newHazardType = HazardType.valueOf(spinner.selectedItem as String)
