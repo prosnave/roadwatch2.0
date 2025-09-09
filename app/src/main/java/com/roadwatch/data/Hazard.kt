@@ -9,7 +9,6 @@ data class Hazard(
     val directionality: String, // ONE_WAY, BIDIRECTIONAL, UNKNOWN
     val reportedHeadingDeg: Float, // heading at time of report
     val userBearing: Float? = null,
-    val roadBearing: Float? = null,
     val active: Boolean = true,
     val source: String = "SEED", // SEED, USER, REMOTE_SYNC
     val createdAt: Instant = Instant.EPOCH,

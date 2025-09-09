@@ -132,9 +132,9 @@ class DriveHudFragment : Fragment() {
         val btnReportRumble = view.findViewById<com.google.android.material.button.MaterialButton>(R.id.btn_report_rumble)
         val btnReportZone = view.findViewById<com.google.android.material.button.MaterialButton>(R.id.btn_report_zone)
 
-        btnReportBump.setOnClickListener { report(HazardType.SPEED_BUMP) }
-        btnReportPothole.setOnClickListener { report(HazardType.POTHOLE) }
-        btnReportRumble.setOnClickListener { report(HazardType.RUMBLE_STRIP) }
+        btnReportBump.setOnClickListener { DriverReportSheet.newInstance(HazardType.SPEED_BUMP).show(parentFragmentManager, "driver_report") }
+        btnReportPothole.setOnClickListener { DriverReportSheet.newInstance(HazardType.POTHOLE).show(parentFragmentManager, "driver_report") }
+        btnReportRumble.setOnClickListener { DriverReportSheet.newInstance(HazardType.RUMBLE_STRIP).show(parentFragmentManager, "driver_report") }
         btnReportZone.setOnClickListener {
             // The zone reporting still needs the sheet for start/end points
             DriverReportSheet.newInstance(HazardType.SPEED_LIMIT_ZONE).show(parentFragmentManager, "driver_report")
@@ -394,76 +394,6 @@ class DriveHudFragment : Fragment() {
             }
         } catch (_: Exception) {}
         parentFragmentManager.popBackStack()
-    }
-
-    private fun report(selected: HazardType) {
-        val loc = com.roadwatch.core.location.DriveModeService.lastKnownLocation
-        if (loc == null) {
-            com.roadwatch.ui.UiAlerts.error(view, "Location unavailable")
-            return
-        }
-
-        if (loc.speed < 0.5f) {
-            com.roadwatch.ui.UiAlerts.info(view, "Please start moving to report a hazard.")
-            return
-        }
-
-        val userBearing = if (loc.hasBearing()) loc.bearing else 0.0f
-        val roadBearing = getRoadBearing(loc.latitude, loc.longitude) // Placeholder
-        val bearingDifference = (userBearing - roadBearing + 360) % 360
-        val directionality = if (bearingDifference <= 30 || bearingDifference >= 330) {
-            "ONE_WAY"
-        } else {
-            "OPPOSITE"
-        }
-
-        val repo = SeedRepository(requireContext())
-        val result = repo.addUserHazardWithDedup(
-            Hazard(
-                type = selected,
-                lat = loc.latitude,
-                lng = loc.longitude,
-                reportedHeadingDeg = userBearing,
-                directionality = directionality,
-                userBearing = userBearing,
-                roadBearing = roadBearing,
-                active = true,
-                source = "USER",
-                createdAt = java.time.Instant.now()
-            )
-        )
-        when (result) {
-            SeedRepository.AddResult.ADDED -> {
-                com.roadwatch.ui.UiAlerts.success(view, "Reported ${selected.name}")
-                if (com.roadwatch.prefs.AppPrefs.isHapticsEnabled(requireContext())) {
-                    try { com.roadwatch.core.util.Haptics.tap(requireContext()) } catch (_: Exception) {}
-                }
-                try {
-                    val refreshIntent = android.content.Intent("com.roadwatch.REFRESH_HAZARDS")
-                    requireContext().sendBroadcast(refreshIntent)
-
-                    val details = "Type: ${selected.name}\n" +
-                            "Location: (${loc.latitude}, ${loc.longitude})\n" +
-                            "User Bearing: $userBearing\n" +
-                            "Road Bearing: $roadBearing\n" +
-                            "Directionality: $directionality"
-                    val reportIntent = android.content.Intent("com.roadwatch.HAZARD_REPORTED").apply {
-                        putExtra("hazard_details", details)
-                    }
-                    requireContext().sendBroadcast(reportIntent)
-                } catch (_: Exception) {}
-            }
-            SeedRepository.AddResult.DUPLICATE_NEARBY -> com.roadwatch.ui.UiAlerts.warn(view, "Similar ${selected.name.lowercase().replace('_',' ')} within 30 m")
-            else -> com.roadwatch.ui.UiAlerts.error(view, "Report failed")
-        }
-        // Hide the buttons and show the main report button again
-    }
-
-    // Placeholder for road bearing service
-    private fun getRoadBearing(lat: Double, lng: Double): Float {
-        // In a real app, this would call a mapping service API
-        // For now, we'll return a random bearing for simulation
-        return (0..360).random().toFloat()
     }
 
     private fun showHazardReportedPopup(hazardDetails: String) {

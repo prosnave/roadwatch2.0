@@ -17,6 +17,7 @@ SERVE=1
 SERVE_ONLY=0
 PRUNE=0
 CLEAN_SERVE=0
+CLEAN_BUILD=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -45,6 +46,10 @@ while [[ $# -gt 0 ]]; do
       SERVE=1
       shift 1
       ;;
+    --clean)
+      CLEAN_BUILD=1
+      shift 1
+      ;;
     -h|--help)
       echo "Usage: $0 [--type debug|release] [--port <port>] [--no-serve]"
       exit 0
@@ -67,11 +72,32 @@ if [[ ! -x ./gradlew ]]; then
   exit 1
 fi
 
+# Ensure a usable Java 17 is available (particularly for non-login shells)
+if [[ -z "${JAVA_HOME:-}" ]]; then
+  if command -v /usr/libexec/java_home >/dev/null 2>&1; then
+    # macOS helper to locate an installed JDK
+    export JAVA_HOME="$((/usr/libexec/java_home -v 17) 2>/dev/null || true)"
+  fi
+fi
+if [[ -z "${JAVA_HOME:-}" ]]; then
+  echo "JAVA_HOME is not set and could not be auto-detected. Please install JDK 17 and/or export JAVA_HOME." >&2
+  echo "Example (macOS): export JAVA_HOME=\$(/usr/libexec/java_home -v 17)" >&2
+  echo "Example (Linux): export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64" >&2
+fi
+if [[ -n "${JAVA_HOME:-}" ]]; then
+  echo "Using JAVA_HOME=${JAVA_HOME}"
+  export PATH="${JAVA_HOME}/bin:${PATH}"
+fi
+
 if [[ "$SERVE_ONLY" -eq 0 ]]; then
   TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
   OUT_DIR="releases/${TIMESTAMP}"
   mkdir -p "$OUT_DIR"
   echo "=== Building APKs (${BUILD_TYPE_LC}) ==="
+  if [[ "$CLEAN_BUILD" -eq 1 ]]; then
+    echo "=== Cleaning build directory ==="
+    ./gradlew clean
+  fi
   if [[ "$BUILD_TYPE_LC" == "debug" ]]; then
     ./gradlew assemblePublicDebug assembleAdminDebug
   else

@@ -7,7 +7,6 @@ object AppPrefs {
     private const val KEY_MUTED_UNTIL = "muted_until"
     private const val KEY_AUDIO_FOCUS = "audio_focus" // DUCK or EXCLUSIVE
     private const val KEY_BG_ALERTS = "background_alerts"
-    private const val KEY_PASSENGER_ENABLED = "passenger_enabled"
     private const val KEY_SPEED_CURVE = "speed_curve" // CONSERVATIVE, NORMAL, AGGRESSIVE
     private const val KEY_ZONE_ENTER = "zone_enter_msg"
     private const val KEY_ZONE_EXIT = "zone_exit_msg"
@@ -64,13 +63,6 @@ object AppPrefs {
         context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
             .getBoolean(KEY_BG_ALERTS, false)
 
-    fun setPassengerEnabled(context: Context, enabled: Boolean) {
-        context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
-            .edit().putBoolean(KEY_PASSENGER_ENABLED, enabled).apply()
-    }
-    fun isPassengerEnabled(context: Context): Boolean =
-        context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
-            .getBoolean(KEY_PASSENGER_ENABLED, true)
 
     fun setSpeedCurve(context: Context, curve: String) {
         context.getSharedPreferences(FILE, Context.MODE_PRIVATE)

@@ -13,7 +13,7 @@ class HazardStore(private val context: Context) {
     init {
         if (!file.exists()) {
             file.parentFile?.mkdirs()
-            file.writeText("id,type,lat,lng,active,directionality,reportedHeadingDeg,source,createdAt,speedLimitKph,zoneLengthMeters,zoneStartLat,zoneStartLng,zoneEndLat,zoneEndLng\n")
+            file.writeText("id,type,lat,lng,active,directionality,reportedHeadingDeg,source,createdAt,speedLimitKph,zoneLengthMeters,zoneStartLat,zoneStartLng,zoneEndLat,zoneEndLng,userBearing\n")
         }
     }
 
@@ -36,7 +36,8 @@ class HazardStore(private val context: Context) {
                 h.zoneStartLat?.toString().orEmpty(),
                 h.zoneStartLng?.toString().orEmpty(),
                 h.zoneEndLat?.toString().orEmpty(),
-                h.zoneEndLng?.toString().orEmpty()
+                h.zoneEndLng?.toString().orEmpty(),
+                h.userBearing?.toString().orEmpty()
             ).joinToString(",")
             file.appendText(line + "\n")
             true
@@ -71,6 +72,7 @@ class HazardStore(private val context: Context) {
                         zoneStartLng = parts.getOrNull(12)?.toDoubleOrNull(),
                         zoneEndLat = parts.getOrNull(13)?.toDoubleOrNull(),
                         zoneEndLng = parts.getOrNull(14)?.toDoubleOrNull(),
+                        userBearing = parts.getOrNull(15)?.toFloatOrNull(),
                     )
                 )
             } catch (_: Exception) {
@@ -106,7 +108,7 @@ class HazardStore(private val context: Context) {
 
     private fun writeAll(items: List<UserHazard>): Boolean {
         return try {
-            file.writeText("id,type,lat,lng,active,directionality,reportedHeadingDeg,source,createdAt,speedLimitKph,zoneLengthMeters,zoneStartLat,zoneStartLng,zoneEndLat,zoneEndLng\n")
+            file.writeText("id,type,lat,lng,active,directionality,reportedHeadingDeg,source,createdAt,speedLimitKph,zoneLengthMeters,zoneStartLat,zoneStartLng,zoneEndLat,zoneEndLng,userBearing\n")
             items.forEach { u ->
                 val h = u.hazard
                 val createdAt = DateTimeFormatter.ISO_INSTANT.format(h.createdAt)
@@ -123,10 +125,11 @@ class HazardStore(private val context: Context) {
                     h.speedLimitKph?.toString().orEmpty(),
                     h.zoneLengthMeters?.toString().orEmpty(),
                     h.zoneStartLat?.toString().orEmpty(),
-                    h.zoneStartLng?.toString().orEmpty(),
-                    h.zoneEndLat?.toString().orEmpty(),
-                    h.zoneEndLng?.toString().orEmpty()
-                ).joinToString(",")
+                h.zoneStartLng?.toString().orEmpty(),
+                h.zoneEndLat?.toString().orEmpty(),
+                h.zoneEndLng?.toString().orEmpty(),
+                h.userBearing?.toString().orEmpty()
+            ).joinToString(",")
                 file.appendText(line + "\n")
             }
             true

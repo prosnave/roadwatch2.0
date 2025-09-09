@@ -35,7 +35,6 @@ class AdminLocationsFragment : Fragment() {
             val votes: Int,
             val directionality: String,
             val userBearing: Float?,
-            val roadBearing: Float?,
         )
 
         fun refresh() {
@@ -50,7 +49,7 @@ class AdminLocationsFragment : Fragment() {
                 val votes = CommunityVotes.getVotes(requireContext(), key)
                 val createdAt = try { h.createdAt.toString() } catch (_: Exception) { "" }
                 rows += Row(
-                    label = buildLabel(h.type.name, active, votes, createdAt, h.directionality, h.reportedHeadingDeg, h.userBearing, h.roadBearing),
+                    label = buildLabel(h.type.name, active, votes, createdAt, h.directionality, h.reportedHeadingDeg, h.userBearing),
                     isUser = false,
                     userId = null,
                     seedKey = key,
@@ -59,7 +58,6 @@ class AdminLocationsFragment : Fragment() {
                     votes = votes,
                     directionality = h.directionality,
                     userBearing = h.userBearing,
-                    roadBearing = h.roadBearing,
                 )
             }
             userHazards.forEach { u ->
@@ -67,7 +65,7 @@ class AdminLocationsFragment : Fragment() {
                 val votes = CommunityVotes.getVotes(requireContext(), voteKey)
                 val createdAt = try { u.hazard.createdAt.toString() } catch (_: Exception) { "" }
                 rows += Row(
-                    label = buildLabel(u.hazard.type.name, u.hazard.active, votes, createdAt, u.hazard.directionality, u.hazard.reportedHeadingDeg, u.hazard.userBearing, u.hazard.roadBearing),
+                    label = buildLabel(u.hazard.type.name, u.hazard.active, votes, createdAt, u.hazard.directionality, u.hazard.reportedHeadingDeg, u.hazard.userBearing),
                     isUser = true,
                     userId = u.id,
                     seedKey = null,
@@ -76,7 +74,6 @@ class AdminLocationsFragment : Fragment() {
                     votes = votes,
                     directionality = u.hazard.directionality,
                     userBearing = u.hazard.userBearing,
-                    roadBearing = u.hazard.roadBearing,
                 )
             }
             // Summary and list rendering
@@ -153,8 +150,8 @@ class AdminLocationsFragment : Fragment() {
                 val voted = CommunityVotes.hasVoted(requireContext(), key)
                 val voteAction = if (voted) "Remove Vote" else "Add Vote"
                 val actions = when {
-                    isAdmin && row.isUser -> arrayOf(voteAction, "Toggle Active", "Delete")
-                    isAdmin && !row.isUser -> arrayOf(voteAction, "Toggle Active")
+                    isAdmin && row.isUser -> arrayOf(voteAction, "Toggle Active", "Delete", "Edit")
+                    isAdmin && !row.isUser -> arrayOf(voteAction, "Toggle Active", "Edit")
                     else -> arrayOf(voteAction)
                 }
                 android.app.AlertDialog.Builder(requireContext())
@@ -170,6 +167,58 @@ class AdminLocationsFragment : Fragment() {
                                 refresh()
                             }
                             "Delete" -> { if (isAdmin && row.isUser) { HazardStore(requireContext()).delete(row.userId!!); refresh() } }
+                            "Edit" -> {
+                                val dialogView = layoutInflater.inflate(R.layout.dialog_edit_hazard, null)
+                                val radioGroup = dialogView.findViewById<RadioGroup>(R.id.radio_group_directionality)
+                                val spinner = dialogView.findViewById<Spinner>(R.id.spinner_hazard_type)
+
+                                val hazardTypes = HazardType.values().filter { it != HazardType.SPEED_LIMIT_ZONE }.map { it.name }
+                                val adapter = ArrayAdapter(requireContext(), android.R.layout.simple_spinner_dropdown_item, hazardTypes)
+                                spinner.adapter = adapter
+
+                                val currentHazard = if (row.isUser) {
+                                    store.list().find { it.id == row.userId }?.hazard
+                                } else {
+                                    repo.loadSeeds().second.find { SeedOverrides.keyOf(it) == row.seedKey }
+                                }
+
+                                currentHazard?.let {
+                                    spinner.setSelection(hazardTypes.indexOf(it.type.name))
+                                    when (it.directionality) {
+                                        "ONE_WAY" -> radioGroup.check(R.id.radio_one_way)
+                                        "BIDIRECTIONAL" -> radioGroup.check(R.id.radio_two_way)
+                                        "OPPOSITE" -> radioGroup.check(R.id.radio_opposite)
+                                    }
+                                }
+
+                                android.app.AlertDialog.Builder(requireContext())
+                                    .setView(dialogView)
+                                    .setPositiveButton("Save") { _, _ ->
+                                        val newDirectionality = when (radioGroup.checkedRadioButtonId) {
+                                            R.id.radio_one_way -> "ONE_WAY"
+                                            R.id.radio_two_way -> "BIDIRECTIONAL"
+                                            R.id.radio_opposite -> "OPPOSITE"
+                                            else -> row.directionality
+                                        }
+                                        val newHazardType = HazardType.valueOf(spinner.selectedItem as String)
+
+                                        if (row.isUser) {
+                                            val userHazard = store.list().find { it.id == row.userId }
+                                            userHazard?.let {
+                                                val updatedHazard = it.hazard.copy(
+                                                    directionality = newDirectionality,
+                                                    type = newHazardType
+                                                )
+                                                store.upsertByKey(SeedOverrides.keyOf(updatedHazard), updatedHazard)
+                                            }
+                                        } else {
+                                            android.util.Log.d("AdminLocationsFragment", "Editing seed hazards is not supported yet.")
+                                        }
+                                        refresh()
+                                    }
+                                    .setNegativeButton("Cancel", null)
+                                    .show()
+                            }
                         }
                     }
                     .show()
@@ -188,7 +237,7 @@ class AdminLocationsFragment : Fragment() {
         refresh()
     }
 
-    private fun buildLabel(type: String, active: Boolean, votes: Int, created: String, directionality: String, heading: Float?, userBearing: Float?, roadBearing: Float?): String {
+    private fun buildLabel(type: String, active: Boolean, votes: Int, created: String, directionality: String, heading: Float?, userBearing: Float?): String {
         val instant = try { java.time.Instant.parse(created) } catch (_: Exception) { java.time.Instant.EPOCH }
         val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(ZoneId.systemDefault())
         val formattedDate = formatter.format(instant)
@@ -202,9 +251,10 @@ class AdminLocationsFragment : Fragment() {
         }
         val hdg = heading?.let { "${it.toInt()}°" } ?: "—"
         val userBrg = userBearing?.let { "${it.toInt()}°" } ?: "—"
-        val roadBrg = roadBearing?.let { "${it.toInt()}°" } ?: "—"
-        val top = "$niceType • $status • votes: $votes"
-        val bottom = "Direction: $niceDir • User Bearing: $userBrg • Road Bearing: $roadBrg • Heading: $hdg • $formattedDate"
+        // Show directionality prominently alongside votes and status
+        val top = "$niceType • $status • votes: $votes • $niceDir"
+        // Keep date and bearings in the subtitle for detail
+        val bottom = "$formattedDate • User Bearing: $userBrg • Heading: $hdg"
         return "$top\n$bottom"
     }
 }

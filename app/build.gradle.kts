@@ -77,15 +77,15 @@ android {
         jvmTarget = "17"
     }
 
-    // Enable Compose
+    // Enable Compose (currently disabled for MVP)
     buildFeatures {
         buildConfig = true
         compose = false
     }
 
-    // Pin a Compose compiler compatible with Kotlin 1.9.10.
+    // Compose compiler version not used when compose=false; kept for future.
     composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.4"
+        kotlinCompilerExtensionVersion = "1.5.14"
     }
 
     flavorDimensions.add("version")

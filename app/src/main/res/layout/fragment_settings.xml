@@ -95,7 +95,6 @@
                 <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Audio Focus" android:layout_marginTop="6dp"/>
                 <Spinner android:id="@+id/spn_audio_focus" android:layout_width="match_parent" android:layout_height="wrap_content" />
                 <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="EXCLUSIVE pauses music during alerts; DUCK lowers volume." android:textColor="#666" android:textSize="12sp"/>
-                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Show passenger-friendly report options when not driving." android:textColor="#666" android:textSize="12sp"/>
                 <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Speed Curve" android:layout_marginTop="12dp"/>
                 <Spinner android:id="@+id/spn_speed_curve" android:layout_width="match_parent" android:layout_height="wrap_content" />
                 <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Conservative calls hazards earlier; Aggressive later." android:textColor="#666" android:textSize="12sp"/>

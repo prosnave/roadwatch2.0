@@ -4,24 +4,28 @@
 
     <!-- Title removed per request for less ambiguity -->
 
-    <TextView android:id="@+id/txt_choose_type" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Select hazard type" android:textAppearance="@style/TextAppearance.Material3.TitleMedium" android:paddingTop="16dp"/>
+    <!-- Road type first -->
+    <TextView
+        android:id="@+id/txt_road_type_label"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Road type"
+        android:paddingBottom="6dp"
+        android:textAppearance="@style/TextAppearance.Material3.TitleMedium"/>
+    <com.google.android.material.button.MaterialButtonToggleGroup android:id="@+id/toggle_direction" android:layout_width="match_parent" android:layout_height="wrap_content" app:singleSelection="true" app:checkedButton="@id/btn_one_way">
+        <com.google.android.material.button.MaterialButton android:id="@+id/btn_one_way" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:minHeight="56dp" android:textSize="16sp" android:text="One-way" android:checkable="true" app:backgroundTint="@color/toggle_bg" android:textColor="@color/toggle_text" app:strokeWidth="1dp" app:strokeColor="@color/toggle_stroke" app:cornerRadius="24dp"/>
+        <com.google.android.material.button.MaterialButton android:id="@+id/btn_two_way" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:minHeight="56dp" android:textSize="16sp" android:text="Two-way" android:checkable="true" app:backgroundTint="@color/toggle_bg" android:textColor="@color/toggle_text" app:strokeWidth="1dp" app:strokeColor="@color/toggle_stroke" app:cornerRadius="24dp"/>
+    </com.google.android.material.button.MaterialButtonToggleGroup>
 
-    <LinearLayout android:id="@+id/type_buttons_container" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingTop="8dp">
-
-        <com.google.android.material.button.MaterialButton android:id="@+id/btn_type_bump" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="72dp" android:textSize="18sp" android:text="Speed bump" style="?attr/materialButtonOutlinedStyle" app:icon="@drawable/ic_marker_bump" app:iconGravity="textStart" app:iconPadding="12dp"/>
-
-        <Space android:layout_width="match_parent" android:layout_height="8dp"/>
-
-        <com.google.android.material.button.MaterialButton android:id="@+id/btn_type_pothole" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="72dp" android:textSize="18sp" android:text="Pothole" style="?attr/materialButtonOutlinedStyle" app:icon="@drawable/ic_marker_pothole" app:iconGravity="textStart" app:iconPadding="12dp"/>
-
-        <Space android:layout_width="match_parent" android:layout_height="8dp"/>
-
-        <com.google.android.material.button.MaterialButton android:id="@+id/btn_type_rumble" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="72dp" android:textSize="18sp" android:text="Rumble strip" style="?attr/materialButtonOutlinedStyle" app:icon="@drawable/ic_marker_rumble" app:iconGravity="textStart" app:iconPadding="12dp"/>
-
-        <Space android:layout_width="match_parent" android:layout_height="8dp"/>
-
-        <com.google.android.material.button.MaterialButton android:id="@+id/btn_type_zone" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="72dp" android:textSize="18sp" android:text="Speed limit zone" style="?attr/materialButtonOutlinedStyle" app:iconGravity="textStart" app:iconPadding="12dp"/>
-    </LinearLayout>
+    <!-- For non-zone hazards, we just submit the selected road type -->
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btn_submit_driver"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:minHeight="64dp"
+        android:text="Submit"
+        android:textSize="16sp"/>
 
     <!-- Speed limit zone details (visible when selected) -->
     <LinearLayout android:id="@+id/zone_block_driver" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone" android:paddingTop="16dp">

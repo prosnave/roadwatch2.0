@@ -49,7 +49,6 @@ class SeedRepository(private val context: Context) {
                                 directionality = directionality,
                                 reportedHeadingDeg = 0.0f,
                                 userBearing = 0.0f,
-                                roadBearing = 0.0f,
                                 speedLimitKph = speedKph,
                                 zoneLengthMeters = zoneLen,
                                 source = "SEED",

@@ -42,29 +42,28 @@ class DriverReportSheet : BottomSheetDialogFragment() {
         val hazardTypeName = arguments?.getString(ARG_HAZARD_TYPE)
         val hazardType = hazardTypeName?.let { HazardType.valueOf(it) }
 
-        // Large hazard type buttons
-        val btnBump = view.findViewById<Button>(R.id.btn_type_bump)
-        val btnPothole = view.findViewById<Button>(R.id.btn_type_pothole)
-        val btnRumble = view.findViewById<Button>(R.id.btn_type_rumble)
-        val btnZone = view.findViewById<Button>(R.id.btn_type_zone)
+        val toggleDir = view.findViewById<com.google.android.material.button.MaterialButtonToggleGroup>(R.id.toggle_direction)
+        val roadTypeLabel = view.findViewById<android.widget.TextView>(R.id.txt_road_type_label)
+        // Submit button for non-zone hazards (hazard type comes from card used to open the sheet)
+        val btnSubmit = view.findViewById<Button>(R.id.btn_submit_driver)
         val zoneBlock = view.findViewById<android.widget.LinearLayout>(R.id.zone_block_driver)
         val edtSpeed = view.findViewById<android.widget.EditText>(R.id.edt_speed_kph_driver)
         val btnZStart = view.findViewById<Button>(R.id.btn_zone_start_driver)
         val btnZEnd = view.findViewById<Button>(R.id.btn_zone_end_driver)
         val txtZStatus = view.findViewById<android.widget.TextView>(R.id.txt_zone_status_driver)
         val btnZSubmit = view.findViewById<Button>(R.id.btn_zone_submit_driver)
-        val typeHeader = view.findViewById<android.widget.TextView>(R.id.txt_choose_type)
-        val typeContainer = view.findViewById<android.widget.LinearLayout>(R.id.type_buttons_container)
-
-        // Show large type buttons for all users (no separate quick report)
+        // Only show zone UI when reporting a speed limit zone; otherwise show a single Submit
         if (hazardType == HazardType.SPEED_LIMIT_ZONE) {
-            typeHeader.visibility = View.GONE
-            typeContainer.visibility = View.GONE
             zoneBlock.visibility = View.VISIBLE
+            btnSubmit.visibility = View.GONE
+            // Hide road type controls for zones; they default to BIDIRECTIONAL
+            roadTypeLabel.visibility = View.GONE
+            toggleDir.visibility = View.GONE
         } else {
-            typeHeader.visibility = View.VISIBLE
-            typeContainer.visibility = View.VISIBLE
             zoneBlock.visibility = View.GONE
+            btnSubmit.visibility = View.VISIBLE
+            roadTypeLabel.visibility = View.VISIBLE
+            toggleDir.visibility = View.VISIBLE
         }
 
         var zoneStart: android.location.Location? = null
@@ -78,15 +77,7 @@ class DriverReportSheet : BottomSheetDialogFragment() {
             }
 
             val userBearing = if (loc.hasBearing()) loc.bearing else 0.0f
-            val roadBearing = getRoadBearing(loc.latitude, loc.longitude) // Placeholder
-            val bearingDifference = (userBearing - roadBearing + 360) % 360
-            val directionality = if (selected == HazardType.SPEED_LIMIT_ZONE) {
-                "BIDIRECTIONAL"
-            } else if (bearingDifference <= 30 || bearingDifference >= 330) {
-                "ONE_WAY"
-            } else {
-                "OPPOSITE"
-            }
+            val directionality = if (toggleDir?.checkedButtonId == R.id.btn_two_way) "BIDIRECTIONAL" else "ONE_WAY"
 
             val repo = SeedRepository(requireContext())
             val result = repo.addUserHazardWithDedup(
@@ -97,7 +88,6 @@ class DriverReportSheet : BottomSheetDialogFragment() {
                     reportedHeadingDeg = userBearing,
                     directionality = directionality,
                     userBearing = userBearing,
-                    roadBearing = roadBearing,
                     active = true,
                     source = "USER",
                     createdAt = Instant.now()
@@ -116,7 +106,6 @@ class DriverReportSheet : BottomSheetDialogFragment() {
                         val details = "Type: ${selected.name}\n" +
                                 "Location: (${loc.latitude}, ${loc.longitude})\n" +
                                 "User Bearing: $userBearing\n" +
-                                "Road Bearing: $roadBearing\n" +
                                 "Directionality: $directionality"
                         val reportIntent = android.content.Intent("com.roadwatch.HAZARD_REPORTED").apply {
                             putExtra("hazard_details", details)
@@ -131,10 +120,21 @@ class DriverReportSheet : BottomSheetDialogFragment() {
             // Only dismiss on success; keep sheet open for errors/duplicates so user can adjust
         }
 
-        btnBump.setOnClickListener { report(HazardType.SPEED_BUMP) }
-        btnPothole.setOnClickListener { report(HazardType.POTHOLE) }
-        btnRumble.setOnClickListener { report(HazardType.RUMBLE_STRIP) }
-        btnZone.setOnClickListener { zoneBlock.visibility = View.VISIBLE }
+        // Non-zone flow: just submit with the hazard type passed when opening the sheet
+        btnSubmit.setOnClickListener {
+            val selected = hazardType
+            if (selected == null) {
+                com.roadwatch.ui.UiAlerts.error(view, "No hazard type specified.")
+                return@setOnClickListener
+            }
+            if (selected == HazardType.SPEED_LIMIT_ZONE) {
+                // Shouldn't happen (zone uses its own block)
+                return@setOnClickListener
+            }
+            report(selected)
+        }
+
+        // Non-zone flow is handled via btnSubmit; zone flow via btnZSubmit
         fun validateZone(): String? {
             val kph = edtSpeed.text.toString().toIntOrNull()
             if (kph == null) {
@@ -153,6 +153,10 @@ class DriverReportSheet : BottomSheetDialogFragment() {
             if (distance < 100) {
                 btnZSubmit.isEnabled = false
                 return "Zone is too short (min 100m)."
+            }
+            if (distance > 2000) {
+                btnZSubmit.isEnabled = false
+                return "Zone is too long (max 2 km)."
             }
             btnZSubmit.isEnabled = true
             return null
@@ -186,7 +190,10 @@ class DriverReportSheet : BottomSheetDialogFragment() {
             val startText = zoneStart?.let { String.format("%.5f, %.5f", it.latitude, it.longitude) } ?: "—"
             val endText = zoneEnd?.let { String.format("%.5f, %.5f", it.latitude, it.longitude) } ?: "—"
             txtZStatus.text = "Start: $startText   End: $endText"
-            validateZone()
+            val msg = validateZone()
+            if (msg != null) {
+                com.roadwatch.ui.UiAlerts.error(view, msg)
+            }
         }
         btnZSubmit.setOnClickListener {
             val errorMessage = validateZone()
@@ -207,8 +214,6 @@ class DriverReportSheet : BottomSheetDialogFragment() {
             val len = distance(zoneStart!!, zoneEnd!!).toInt()
             val repo = SeedRepository(requireContext())
             val userBearing = if (loc.hasBearing()) loc.bearing else 0.0f
-            val roadBearing = getRoadBearing(loc.latitude, loc.longitude) // Placeholder
-            val bearingDifference = (userBearing - roadBearing + 360) % 360
             val directionality = "BIDIRECTIONAL"
 
             val h = Hazard(
@@ -218,7 +223,6 @@ class DriverReportSheet : BottomSheetDialogFragment() {
                 reportedHeadingDeg = userBearing,
                 directionality = directionality,
                 userBearing = userBearing,
-                roadBearing = roadBearing,
                 active = true,
                 source = "USER",
                 createdAt = Instant.now(),
@@ -239,7 +243,6 @@ class DriverReportSheet : BottomSheetDialogFragment() {
                         val details = "Type: ${h.type.name}\n" +
                                 "Location: (${h.lat}, ${h.lng})\n" +
                                 "User Bearing: ${h.userBearing}\n" +
-                                "Road Bearing: ${h.roadBearing}\n" +
                                 "Directionality: ${h.directionality}"
                         val reportIntent = android.content.Intent("com.roadwatch.HAZARD_REPORTED").apply {
                             putExtra("hazard_details", details)
@@ -264,13 +267,6 @@ class DriverReportSheet : BottomSheetDialogFragment() {
             try { dismissAllowingStateLoss() } catch (_: Exception) {}
         }
     }
-}
-
-// Placeholder for road bearing service
-private fun getRoadBearing(lat: Double, lng: Double): Float {
-    // In a real app, this would call a mapping service API
-    // For now, we'll return a random bearing for simulation
-    return (0..360).random().toFloat()
 }
 
 private fun distance(a: android.location.Location, b: android.location.Location): Double {
