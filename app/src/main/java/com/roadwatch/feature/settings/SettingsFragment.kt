@@ -2,6 +2,7 @@ package com.roadwatch.feature.settings
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.view.LayoutInflater
@@ -10,6 +11,7 @@ import android.view.ViewGroup
 import android.widget.Button
 import android.widget.TextView
 import androidx.fragment.app.Fragment
+import androidx.activity.result.contract.ActivityResultContracts
 import com.roadwatch.app.BuildConfig
 import com.roadwatch.app.R
 import com.roadwatch.data.SeedRepository
@@ -25,6 +27,13 @@ class SettingsFragment : Fragment() {
     private val ioScope = CoroutineScope(Dispatchers.IO)
     private var tts: TextToSpeech? = null
     private var ttsReady: Boolean = false
+
+    // File picker for CSV imports
+    private val importCsvLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri != null) {
+            ioScope.launch { importFromUri(uri) }
+        }
+    }
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -209,69 +218,22 @@ class SettingsFragment : Fragment() {
         }
 
         btnImport.setOnClickListener {
-            ioScope.launch {
-                val exportDir = File(requireContext().filesDir, "exports")
-                val file = File(exportDir, "hazards_export.csv")
-                var imported = 0
-                if (file.exists()) {
-                    file.bufferedReader().useLines { lines ->
-                        val iter = lines.iterator()
-                        if (iter.hasNext()) iter.next() // skip header
-                        while (iter.hasNext()) {
-                            val raw = iter.next().trim()
-                            if (raw.isEmpty()) continue
-                            val cols = raw.split(',')
-                            try {
-                                val type = com.roadwatch.data.HazardType.valueOf(cols[0])
-                                val lat = cols[1].toDouble()
-                                val lng = cols[2].toDouble()
-                                val source = cols.getOrNull(3) ?: "USER"
-                                val active = cols.getOrNull(4)?.toBooleanStrictOrNull() ?: true
-                                val votes = cols.getOrNull(5)?.toIntOrNull() ?: 0
-                                val directionality = cols.getOrNull(6) ?: "UNKNOWN"
-                                val createdAt = cols.getOrNull(7) ?: ""
-                                val speedKph = cols.getOrNull(8)?.toIntOrNull()
-                                val zoneLen = cols.getOrNull(9)?.toIntOrNull()
-                                val zoneStartLat = cols.getOrNull(10)?.toDoubleOrNull()
-                                val zoneStartLng = cols.getOrNull(11)?.toDoubleOrNull()
-                                val zoneEndLat = cols.getOrNull(12)?.toDoubleOrNull()
-                                val zoneEndLng = cols.getOrNull(13)?.toDoubleOrNull()
-                                val h = com.roadwatch.data.Hazard(
-                                    type = type,
-                                    lat = lat,
-                                    lng = lng,
-                                    active = active,
-                                    directionality = directionality,
-                                    reportedHeadingDeg = 0.0f,
-                                    speedLimitKph = speedKph,
-                                    zoneLengthMeters = zoneLen,
-                                    zoneStartLat = zoneStartLat,
-                                    zoneStartLng = zoneStartLng,
-                                    zoneEndLat = zoneEndLat,
-                                    zoneEndLng = zoneEndLng,
-                                )
-                                val key = com.roadwatch.data.SeedOverrides.keyOf(h)
-                                // Merge votes (take max of local and imported)
-                                val localVotes = com.roadwatch.data.CommunityVotes.getVotes(requireContext(), key)
-                                if (votes > localVotes) com.roadwatch.data.CommunityVotes.setVotes(requireContext(), key, votes)
-                                if (source == "USER") {
-                                    // Upsert into user hazards
-                                    com.roadwatch.data.HazardStore(requireContext()).upsertByKey(key, h)
-                                } else {
-                                    // Apply active override to seeds
-                                    com.roadwatch.data.SeedOverrides.setDisabled(requireContext(), key, !active)
-                                }
-                                imported++
-                            } catch (_: Exception) {}
-                        }
+            // Prompt user to pick a CSV; fallback to internal export file if canceled
+            try {
+                importCsvLauncher.launch(arrayOf("text/csv", "text/*", "application/csv", "application/vnd.ms-excel"))
+            } catch (_: Exception) {
+                // Fallback: import from internal default path
+                ioScope.launch {
+                    val exportDir = File(requireContext().filesDir, "exports")
+                    val file = File(exportDir, "hazards_export.csv")
+                    if (file.exists()) importFromReader(file.bufferedReader()) else requireActivity().runOnUiThread {
+                        status.text = "No export file found."
                     }
-                }
-                requireActivity().runOnUiThread {
-                    status.text = if (imported > 0) "Imported $imported rows (merged)" else "No export file found or empty"
-                    refreshDataButtons()
                 }
             }
         }
+
+        // ...
         btnAdmin.setOnClickListener {
             parentFragmentManager.beginTransaction()
                 .replace(com.roadwatch.app.R.id.fragment_container, com.roadwatch.feature.admin.AdminLocationsFragment())
@@ -433,4 +395,75 @@ class SettingsFragment : Fragment() {
         }
     }
     private var pendingBgCallback: ((Boolean) -> Unit)? = null
+}
+
+// Import helpers
+private fun SettingsFragment.importFromReader(reader: java.io.Reader) {
+    var imported = 0
+    reader.useLines { lines ->
+        val iter = lines.iterator()
+        if (iter.hasNext()) iter.next() // header
+        while (iter.hasNext()) {
+            val raw = iter.next().trim()
+            if (raw.isEmpty()) continue
+            val cols = raw.split(',')
+            try {
+                val type = com.roadwatch.data.HazardType.valueOf(cols[0])
+                val lat = cols[1].toDouble()
+                val lng = cols[2].toDouble()
+                val source = cols.getOrNull(3) ?: "USER"
+                val active = cols.getOrNull(4)?.toBooleanStrictOrNull() ?: true
+                val votes = cols.getOrNull(5)?.toIntOrNull() ?: 0
+                val directionality = cols.getOrNull(6) ?: "UNKNOWN"
+                val createdAtStr = cols.getOrNull(7) ?: ""
+                val speedKph = cols.getOrNull(8)?.toIntOrNull()
+                val zoneLen = cols.getOrNull(9)?.toIntOrNull()
+                val zoneStartLat = cols.getOrNull(10)?.toDoubleOrNull()
+                val zoneStartLng = cols.getOrNull(11)?.toDoubleOrNull()
+                val zoneEndLat = cols.getOrNull(12)?.toDoubleOrNull()
+                val zoneEndLng = cols.getOrNull(13)?.toDoubleOrNull()
+                val createdAt = try {
+                    if (createdAtStr.isNotBlank()) java.time.Instant.parse(createdAtStr) else java.time.Instant.now()
+                } catch (_: Exception) { java.time.Instant.now() }
+                val h = com.roadwatch.data.Hazard(
+                    type = type,
+                    lat = lat,
+                    lng = lng,
+                    active = active,
+                    directionality = directionality,
+                    reportedHeadingDeg = 0.0f,
+                    speedLimitKph = speedKph,
+                    zoneLengthMeters = zoneLen,
+                    zoneStartLat = zoneStartLat,
+                    zoneStartLng = zoneStartLng,
+                    zoneEndLat = zoneEndLat,
+                    zoneEndLng = zoneEndLng,
+                    createdAt = createdAt,
+                )
+                val key = com.roadwatch.data.SeedOverrides.keyOf(h)
+                val localVotes = com.roadwatch.data.CommunityVotes.getVotes(requireContext(), key)
+                if (votes > localVotes) com.roadwatch.data.CommunityVotes.setVotes(requireContext(), key, votes)
+                if (source == "USER") {
+                    com.roadwatch.data.HazardStore(requireContext()).upsertByKey(key, h)
+                } else {
+                    com.roadwatch.data.SeedOverrides.setDisabled(requireContext(), key, !active)
+                }
+                imported++
+            } catch (_: Exception) {}
+        }
+    }
+    requireActivity().runOnUiThread {
+        val status = view?.findViewById<TextView>(R.id.txt_status)
+        status?.text = if (imported > 0) "Imported $imported rows (merged)" else "No rows imported"
+    }
+}
+
+private suspend fun SettingsFragment.importFromUri(uri: Uri) {
+    val cr = requireContext().contentResolver
+    cr.openInputStream(uri)?.bufferedReader()?.use {
+        importFromReader(it)
+    } ?: requireActivity().runOnUiThread {
+        val status = view?.findViewById<TextView>(R.id.txt_status)
+        status?.text = "Failed to open selected file"
+    }
 }
