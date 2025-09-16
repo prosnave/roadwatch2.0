@@ -38,6 +38,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.Locale
 import androidx.activity.result.contract.ActivityResultContracts
 
 class DriveHudFragment : Fragment() {
@@ -825,17 +826,26 @@ class DriveHudFragment : Fragment() {
                     else -> u.hazard.reportedHeadingDeg
                 }
                 val opposite = normalizeBearing(baseHeading + 180f)
+                val newDirectionality = when (u.hazard.directionality.uppercase(Locale.US)) {
+                    "BIDIRECTIONAL" -> "ONE_WAY"
+                    "ONE_WAY" -> "ONE_WAY"
+                    else -> "ONE_WAY"
+                }
                 val updated = u.hazard.copy(
-                    directionality = "OPPOSITE",
+                    directionality = newDirectionality,
                     reportedHeadingDeg = opposite,
                     userBearing = opposite,
                 )
                 val originalKey = com.roadwatch.data.SeedOverrides.keyOf(u.hazard)
                 if (store.upsertByKey(originalKey, updated)) {
+                    val updatedUser = u.copy(hazard = updated)
                     notifyRefresh()
                     refreshMarkers()
-                    com.roadwatch.ui.UiAlerts.success(view, "Marked for opposite lane")
                     dialog.dismiss()
+                    startMovePin(
+                        updatedUser,
+                        ctx.getString(com.roadwatch.app.R.string.move_pin_opposite_prompt)
+                    )
                 } else {
                     com.roadwatch.ui.UiAlerts.error(view, "Update failed")
                 }
@@ -864,9 +874,10 @@ class DriveHudFragment : Fragment() {
     }
 
     private var pendingMove: com.roadwatch.data.UserHazard? = null
-    private fun startMovePin(u: com.roadwatch.data.UserHazard) {
+    private fun startMovePin(u: com.roadwatch.data.UserHazard, message: String? = null) {
         pendingMove = u
-        com.roadwatch.ui.UiAlerts.info(view, "Tap map to set new location for this hazard.")
+        val prompt = message ?: getString(com.roadwatch.app.R.string.tap_map_set_location)
+        com.roadwatch.ui.UiAlerts.info(view, prompt)
         googleMap?.setOnMapClickListener { latLng ->
             finalizeMovePin(latLng)
         }

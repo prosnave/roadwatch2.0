@@ -245,7 +245,7 @@ class AdminLocationsFragment : Fragment() {
         val niceDir = when (directionality.uppercase()) {
             "ONE_WAY" -> "One-way"
             "BIDIRECTIONAL" -> "Two-way"
-            "OPPOSITE" -> "Opposite"
+            "OPPOSITE" -> getString(com.roadwatch.app.R.string.mark_wrong_direction)
             else -> "Unknown"
         }
         val hdg = heading?.let { "${it.toInt()}°" } ?: "—"

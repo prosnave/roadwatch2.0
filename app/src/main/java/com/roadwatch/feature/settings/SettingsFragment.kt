@@ -168,7 +168,7 @@ class SettingsFragment : Fragment() {
             ioScope.launch {
                 val repo = SeedRepository(requireContext())
                 val (seedLoad, seeds) = repo.loadSeeds()
-                val users = repo.loadUserHazards().map { it.hazard }
+                val users = repo.loadUserHazards()
                 val exportDir = File(requireContext().filesDir, "exports").apply { mkdirs() }
                 val out = File(exportDir, "hazards_export.csv")
                 out.bufferedWriter().use { w ->
@@ -195,7 +195,21 @@ class SettingsFragment : Fragment() {
                     ).joinToString(",")
                     w.appendLine(header)
 
-                    fun writeHazardRow(hazard: com.roadwatch.data.Hazard, activeOverride: Boolean?, votes: Int) {
+                    fun com.roadwatch.data.Hazard.optionalField(name: String): Any? = try {
+                        val field = this::class.java.getDeclaredField(name)
+                        field.isAccessible = true
+                        field.get(this)
+                    } catch (_: Exception) { null }
+
+                    fun writeHazardRow(
+                        hazard: com.roadwatch.data.Hazard,
+                        activeOverride: Boolean?,
+                        votes: Int,
+                        fallbackId: String? = null,
+                    ) {
+                        val resolvedId = (hazard.optionalField("id") as? String) ?: fallbackId ?: ""
+                        val resolvedUpdatedAt = (hazard.optionalField("updatedAt") as? java.time.Instant)?.toString().orEmpty()
+                        val resolvedVotesCount = (hazard.optionalField("votesCount") as? Number)?.toInt() ?: votes
                         val row = listOf(
                             hazard.type.name,
                             hazard.lat.toString(),
@@ -206,16 +220,16 @@ class SettingsFragment : Fragment() {
                             hazard.reportedHeadingDeg.toString(),
                             hazard.userBearing?.toString().orEmpty(),
                             hazard.createdAt.toString(),
-                            hazard.updatedAt.toString(),
+                            resolvedUpdatedAt,
                             hazard.speedLimitKph?.toString().orEmpty(),
                             hazard.zoneLengthMeters?.toString().orEmpty(),
                             hazard.zoneStartLat?.toString().orEmpty(),
                             hazard.zoneStartLng?.toString().orEmpty(),
                             hazard.zoneEndLat?.toString().orEmpty(),
                             hazard.zoneEndLng?.toString().orEmpty(),
-                            hazard.id.orEmpty(),
+                            resolvedId,
                             votes.toString(),
-                            hazard.votesCount.toString()
+                            resolvedVotesCount.toString()
                         )
                         w.appendLine(row.joinToString(","))
                     }
@@ -228,10 +242,11 @@ class SettingsFragment : Fragment() {
                         writeHazardRow(hazard, active, votes)
                     }
                     // User hazards
-                    users.forEach { hazard ->
+                    users.forEach { entry ->
+                        val hazard = entry.hazard
                         val key = com.roadwatch.data.SeedOverrides.keyOf(hazard)
                         val votes = com.roadwatch.data.CommunityVotes.getVotes(requireContext(), key)
-                        writeHazardRow(hazard, null, votes)
+                        writeHazardRow(hazard, null, votes, fallbackId = entry.id)
                     }
                 }
                 // Also copy to public Downloads/RoadWatch (Android Q+)
@@ -468,17 +483,12 @@ private fun SettingsFragment.importFromReader(reader: java.io.Reader) {
                 val createdAt = valueFor("createdat", "created_at")?.let {
                     try { java.time.Instant.parse(it) } catch (_: Exception) { java.time.Instant.now() }
                 } ?: java.time.Instant.now()
-                val updatedAt = valueFor("updatedat", "updated_at")?.let {
-                    try { java.time.Instant.parse(it) } catch (_: Exception) { createdAt }
-                } ?: createdAt
                 val speedKph = valueFor("speedlimitkph", "speed_limit_kph")?.toIntOrNull()
                 val zoneLen = valueFor("zonelengthmeters", "zone_length_meters")?.toIntOrNull()
                 val zoneStartLat = valueFor("zonestartlat", "zone_start_lat")?.toDoubleOrNull()
                 val zoneStartLng = valueFor("zonestartlng", "zone_start_lng")?.toDoubleOrNull()
                 val zoneEndLat = valueFor("zoneendlat", "zone_end_lat")?.toDoubleOrNull()
                 val zoneEndLng = valueFor("zoneendlng", "zone_end_lng")?.toDoubleOrNull()
-                val id = valueFor("id")
-                val votesCount = valueFor("votescount", "votes_count")?.toIntOrNull() ?: votes
                 val h = com.roadwatch.data.Hazard(
                     type = type,
                     lat = lat,
@@ -495,9 +505,6 @@ private fun SettingsFragment.importFromReader(reader: java.io.Reader) {
                     zoneEndLat = zoneEndLat,
                     zoneEndLng = zoneEndLng,
                     createdAt = createdAt,
-                    updatedAt = updatedAt,
-                    id = id,
-                    votesCount = votesCount,
                 )
                 val key = com.roadwatch.data.SeedOverrides.keyOf(h)
                 val localVotes = com.roadwatch.data.CommunityVotes.getVotes(requireContext(), key)

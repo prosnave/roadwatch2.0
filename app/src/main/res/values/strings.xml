@@ -37,4 +37,7 @@
     <string name="add_hazard">Add Hazard</string>
     <string name="mute_notifications">Mute Notifications (20m)</string>
     <string name="unmute_notifications">Unmute Notifications</string>
+    <string name="mark_wrong_direction">Mark wrong direction</string>
+    <string name="move_pin_opposite_prompt">Direction flipped. Tap the correct lane to place the hazard.</string>
+    <string name="tap_map_set_location">Tap map to set new location for this hazard.</string>
 </resources>
