@@ -32,6 +32,14 @@
 
         <service android:name="com.roadwatch.core.location.DriveModeService" android:enabled="true" android:exported="false" android:foregroundServiceType="location" />
 
+        <receiver android:name="com.roadwatch.sync.SyncReceiver" android:exported="false">
+            <intent-filter>
+                <action android:name="com.roadwatch.sync.ACTION_SYNC" />
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+        <service android:name="com.roadwatch.sync.SyncService" android:exported="false" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

@@ -5,6 +5,7 @@ import android.location.Location
 import android.util.Log
 import com.roadwatch.data.Hazard
 import com.roadwatch.data.SeedRepository
+import com.roadwatch.data.RemoteHazardCache
 import com.roadwatch.notifications.NotificationHelper
 import android.speech.tts.TextToSpeech
 import com.roadwatch.prefs.AppPrefs
@@ -16,6 +17,7 @@ import kotlin.math.*
 
 class AlertManager(private val context: Context) {
     private val repo = SeedRepository(context)
+    private val remote = RemoteHazardCache(context)
     private var lastAlertTime = 0L
     private val lastPerHazard = mutableMapOf<String, Long>()
     private val preQuietUntil = mutableMapOf<String, Long>()
@@ -41,7 +43,9 @@ class AlertManager(private val context: Context) {
 
     fun onLocationUpdate(loc: Location) {
         if (AppPrefs.isMuted(context)) return
-        val hazards = repo.activeHazards()
+        // Prefer remote hazards when server configured; fallback to local seed/user hazards
+        val base = com.roadwatch.prefs.AppPrefs.getBaseUrl(context).trim()
+        val hazards = if (base.isNotEmpty()) remote.getNearby(loc) else repo.activeHazards()
         handleZones(loc, hazards)
         // Low-motion throttling: skip hazard callouts at very low speed
         if (loc.speed < 1.5f) return // ~5.4 kph
@@ -102,6 +106,7 @@ class AlertManager(private val context: Context) {
                             if (f != null) speakDouble(text, f) else speakWithFocus(text)
                         }
                         sendOverlay(text)
+                        sendUiStateUpdate("HAZARD_APPROACHING", null)
                         return
                     }
                 }
@@ -157,6 +162,7 @@ class AlertManager(private val context: Context) {
             if (f != null) speakDouble(text, f) else speakWithFocus(text)
         }
         sendOverlay(text)
+        sendUiStateUpdate("HAZARD_APPROACHING", null)
     }
 
     private fun speakWithFocus(text: String) {
@@ -235,6 +241,16 @@ class AlertManager(private val context: Context) {
     private fun sendOverlay(text: String) {
         try {
             val intent = android.content.Intent("com.roadwatch.ALERT_OVERLAY").apply { putExtra("text", text) }
+            context.sendBroadcast(intent)
+        } catch (_: Exception) {}
+    }
+
+    private fun sendUiStateUpdate(state: String, speedLimit: Int?) {
+        try {
+            val intent = android.content.Intent("com.roadwatch.UI_STATE_UPDATE").apply {
+                putExtra("state", state)
+                speedLimit?.let { putExtra("speed_limit", it) }
+            }
             context.sendBroadcast(intent)
         } catch (_: Exception) {}
     }
@@ -460,7 +476,17 @@ class AlertManager(private val context: Context) {
 
     private fun handleZones(loc: Location, hazards: List<Hazard>) {
         val zones = hazards.filter { it.type.name == "SPEED_LIMIT_ZONE" }
-        if (zones.isEmpty()) return
+        if (zones.isEmpty()) {
+            if (inZone) {
+                inZone = false
+                sendUiStateUpdate("NORMAL", null)
+                val msg = if (zoneLimitKph != null) "Exiting speed limit zone" else AppPrefs.getZoneExit(context)
+                if (ttsReady && AppPrefs.isAudioEnabled(context)) { ensurePlaybackVolume(); speakWithFocus(msg) }
+                sendOverlay(msg)
+                zoneEntryLat = null; zoneEntryLng = null; zoneLength = null; zoneLimitKph = null; zoneExitWarned = false
+            }
+            return
+        }
         val nearest = zones.minByOrNull { distanceMeters(loc.latitude, loc.longitude, it.lat, it.lng) }
         val dist = if (nearest != null) distanceMeters(loc.latitude, loc.longitude, nearest.lat, nearest.lng) else Double.MAX_VALUE
         val inside = dist < 100.0 // basic radius; replace with zoneLengthMeters if provided
@@ -486,6 +512,20 @@ class AlertManager(private val context: Context) {
                 if (ttsReady && AppPrefs.isAudioEnabled(context)) { ensurePlaybackVolume(); speakWithFocus(msg) }
                 sendOverlay(msg)
             }
+
+            // Check speed and update UI state
+            val limit = zoneLimitKph
+            if (limit != null) {
+                val speedKph = loc.speed * 3.6
+                val overspeed = speedKph - limit
+                val state = when {
+                    overspeed > 10 -> "CRITICAL"
+                    overspeed > 0 -> "WARNING"
+                    else -> "NORMAL"
+                }
+                sendUiStateUpdate(state, limit)
+            }
+
             // Pre-warn exit if we have zone length and entry
             val len = zoneLength
             val eLat = zoneEntryLat
@@ -522,6 +562,7 @@ class AlertManager(private val context: Context) {
             }
         } else if (inZone && !inside) {
             inZone = false
+            sendUiStateUpdate("NORMAL", null)
             val msg = if (zoneLimitKph != null) "Exiting speed limit zone" else AppPrefs.getZoneExit(context)
             if (ttsReady && AppPrefs.isAudioEnabled(context)) { ensurePlaybackVolume(); speakWithFocus(msg) }
             sendOverlay(msg)

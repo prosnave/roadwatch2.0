@@ -22,6 +22,20 @@ object AppPrefs {
     private const val KEY_LAST_AUTOSTOP_LNG = "last_autostop_lng"
     private const val KEY_LAST_AUTOSTOP_AT = "last_autostop_at"
     private const val KEY_LAST_DND_PROMPT_AT = "last_dnd_prompt_at"
+    private const val KEY_BASE_URL = "base_url"
+    private const val KEY_DEVICE_TOKEN = "device_token"
+    private const val KEY_SYNC_RADIUS_M = "sync_radius_m"
+    private const val KEY_LAST_SINCE = "last_since"
+    private const val KEY_ADMIN_ACCESS = "admin_access_token"
+    private const val KEY_ADMIN_REFRESH = "admin_refresh_token"
+    private const val KEY_LAST_LAT = "last_lat"
+    private const val KEY_LAST_LNG = "last_lng"
+    private const val KEY_ACCOUNT_EMAIL = "account_email"
+    private const val KEY_ACCOUNT_PASSWORD = "account_password"
+    private const val KEY_BASE_URL = "base_url"
+    private const val KEY_DEVICE_TOKEN = "device_token"
+    private const val KEY_SYNC_RADIUS_M = "sync_radius_m"
+    private const val KEY_LAST_SINCE = "last_since"
 
     fun setMutedForMinutes(context: Context, minutes: Int) {
         val until = System.currentTimeMillis() + minutes * 60_000L
@@ -185,4 +199,73 @@ object AppPrefs {
     fun getLastDndPromptAt(context: Context): Long =
         context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
             .getLong(KEY_LAST_DND_PROMPT_AT, 0L)
+
+    // Backend settings
+    fun setBaseUrl(context: Context, url: String) {
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .edit().putString(KEY_BASE_URL, url).apply()
+    }
+    fun getBaseUrl(context: Context): String =
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .getString(KEY_BASE_URL, "") ?: ""
+
+    fun setDeviceToken(context: Context, token: String?) {
+        val e = context.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit()
+        if (token == null) e.remove(KEY_DEVICE_TOKEN) else e.putString(KEY_DEVICE_TOKEN, token)
+        e.apply()
+    }
+    fun getDeviceToken(context: Context): String? =
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE).getString(KEY_DEVICE_TOKEN, null)
+
+    fun setSyncRadiusMeters(context: Context, meters: Int) {
+        val safe = when {
+            meters < 50 -> 50
+            meters > 20000 -> 20000
+            else -> meters
+        }
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .edit().putInt(KEY_SYNC_RADIUS_M, safe).apply()
+    }
+    fun getSyncRadiusMeters(context: Context): Int =
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE).getInt(KEY_SYNC_RADIUS_M, 3000)
+
+    fun setLastSince(context: Context, sinceIso: String) {
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .edit().putString(KEY_LAST_SINCE, sinceIso).apply()
+    }
+    fun getLastSince(context: Context): String? =
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE).getString(KEY_LAST_SINCE, null)
+
+    fun setAdminTokens(context: Context, access: String?, refresh: String?) {
+        val e = context.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit()
+        if (access == null) e.remove(KEY_ADMIN_ACCESS) else e.putString(KEY_ADMIN_ACCESS, access)
+        if (refresh == null) e.remove(KEY_ADMIN_REFRESH) else e.putString(KEY_ADMIN_REFRESH, refresh)
+        e.apply()
+    }
+    fun getAdminAccess(context: Context): String? =
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE).getString(KEY_ADMIN_ACCESS, null)
+    fun getAdminRefresh(context: Context): String? =
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE).getString(KEY_ADMIN_REFRESH, null)
+
+    fun setLastLocation(context: Context, lat: Double, lng: Double) {
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .edit().putFloat(KEY_LAST_LAT, lat.toFloat()).putFloat(KEY_LAST_LNG, lng.toFloat()).apply()
+    }
+    fun getLastLocation(context: Context): Pair<Double, Double>? {
+        val p = context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+        if (!p.contains(KEY_LAST_LAT) || !p.contains(KEY_LAST_LNG)) return null
+        return p.getFloat(KEY_LAST_LAT, 0f).toDouble() to p.getFloat(KEY_LAST_LNG, 0f).toDouble()
+    }
+
+    // Account credentials (Basic auth)
+    fun setAccountCredentials(context: Context, email: String?, password: String?) {
+        val e = context.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit()
+        if (email == null) e.remove(KEY_ACCOUNT_EMAIL) else e.putString(KEY_ACCOUNT_EMAIL, email)
+        if (password == null) e.remove(KEY_ACCOUNT_PASSWORD) else e.putString(KEY_ACCOUNT_PASSWORD, password)
+        e.apply()
+    }
+    fun getAccountEmail(context: Context): String? =
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE).getString(KEY_ACCOUNT_EMAIL, null)
+    fun getAccountPassword(context: Context): String? =
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE).getString(KEY_ACCOUNT_PASSWORD, null)
 }

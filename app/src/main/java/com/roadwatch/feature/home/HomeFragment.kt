@@ -41,10 +41,24 @@ class HomeFragment : Fragment() {
         val settingsBtn = view.findViewById<Button>(R.id.btn_open_settings)
 
         ioScope.launch {
-            val repo = SeedRepository(requireContext())
-            val visible = repo.activeHazards().size
+            val base = com.roadwatch.prefs.AppPrefs.getBaseUrl(requireContext()).trim()
+            val loc = com.roadwatch.core.location.DriveModeService.lastKnownLocation
+            val visible = try {
+                if (base.isNotEmpty() && loc != null) {
+                    val res = com.roadwatch.network.ApiClient.listHazards(
+                        base,
+                        loc.latitude,
+                        loc.longitude,
+                        com.roadwatch.prefs.AppPrefs.getSyncRadiusMeters(requireContext()),
+                        50,
+                        null,
+                        null
+                    )
+                    if (res.isSuccess) res.getOrNull()!!.hazards.size else 0
+                } else 0
+            } catch (_: Exception) { 0 }
             withContext(Dispatchers.Main) {
-                statusText.text = "Ready • Visible hazards: ${visible}"
+                statusText.text = if (visible > 0) "Ready • Visible hazards: ${visible}" else getString(R.string.ready)
             }
         }
 

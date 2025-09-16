@@ -14,6 +14,8 @@
         <RadioButton android:id="@+id/radio_one_way" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="One-way" />
 
         <RadioButton android:id="@+id/radio_two_way" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Two-way" />
+
+        <RadioButton android:id="@+id/radio_opposite" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Opposite" />
     </RadioGroup>
 
 </LinearLayout>

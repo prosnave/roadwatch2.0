@@ -25,6 +25,7 @@ import androidx.core.content.ContextCompat
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
+import android.media.AudioManager
 import android.os.Looper
 import android.content.BroadcastReceiver
 import android.content.IntentFilter
@@ -50,9 +51,10 @@ class DriveHudFragment : Fragment() {
     private var lastBaselineTime: Long = 0L
     private var lastMoveTime: Long = 0L
     private val idleDistanceMeters = 100.0
-    private val idleTimeoutMs = 120_000L
+    private val idleTimeoutMs = 240_000L
     private var providersReceiver: BroadcastReceiver? = null
     private var overlayReceiver: BroadcastReceiver? = null
+    private var uiStateReceiver: BroadcastReceiver? = null
     private val locListener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
             googleMap?.isMyLocationEnabled = hasFinePermission()
@@ -285,6 +287,19 @@ class DriveHudFragment : Fragment() {
             }
             requireContext().registerReceiver(overlayReceiver, filter)
         }
+
+        // Listen for UI state updates
+        if (uiStateReceiver == null) {
+            uiStateReceiver = object : BroadcastReceiver() {
+                override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
+                    if (intent?.action == "com.roadwatch.UI_STATE_UPDATE") {
+                        val state = intent.getStringExtra("state") ?: "NORMAL"
+                        updateSpeedCardBackground(state)
+                    }
+                }
+            }
+            requireContext().registerReceiver(uiStateReceiver, IntentFilter("com.roadwatch.UI_STATE_UPDATE"))
+        }
     }
 
     override fun onPause() {
@@ -295,6 +310,8 @@ class DriveHudFragment : Fragment() {
         providersReceiver = null
         try { requireContext().unregisterReceiver(overlayReceiver) } catch (_: Exception) {}
         overlayReceiver = null
+        try { requireContext().unregisterReceiver(uiStateReceiver) } catch (_: Exception) {}
+        uiStateReceiver = null
     }
 
     companion object {
@@ -430,6 +447,12 @@ class DriveHudFragment : Fragment() {
 
     // --- Prerequisites: notifications allowed, location permission, location services on ---
     private fun ensurePrerequisitesOrExit() {
+        // Ringer mode check
+        val am = requireContext().getSystemService(android.content.Context.AUDIO_SERVICE) as AudioManager
+        if (am.ringerMode != AudioManager.RINGER_MODE_NORMAL) {
+            Toast.makeText(requireContext(), "For audible alerts, ensure ringer is on.", Toast.LENGTH_LONG).show()
+        }
+
         // Notifications
         if (!NotificationManagerCompat.from(requireContext()).areNotificationsEnabled()) {
             // On Android 13+, request POST_NOTIFICATIONS; otherwise guide to settings
@@ -518,6 +541,24 @@ class DriveHudFragment : Fragment() {
         while (b < 0) b += 360.0
         val idx = ((b + 11.25) / 22.5).toInt() % 16
         return dirs[idx]
+    }
+
+    private fun updateSpeedCardBackground(state: String) {
+        val speedCard = view?.findViewById<com.google.android.material.card.MaterialCardView>(R.id.speed_card)
+        val colorRes = when (state) {
+            "CRITICAL" -> R.color.alert_critical
+            "WARNING" -> R.color.alert_warning
+            "HAZARD_APPROACHING" -> R.color.alert_hazard_approaching
+            else -> R.color.surface_container_high
+        }
+        speedCard?.setCardBackgroundColor(ContextCompat.getColor(requireContext(), colorRes))
+
+        // If it's a temporary alert, reset the color after a delay
+        if (state == "HAZARD_APPROACHING") {
+            view?.postDelayed({
+                updateSpeedCardBackground("NORMAL")
+            }, 3000L)
+        }
     }
 
     private fun updateNextHazardChip(location: Location) {
@@ -656,39 +697,108 @@ class DriveHudFragment : Fragment() {
 
     private fun openHazardEditor(h: com.roadwatch.data.Hazard) {
         val ctx = requireContext()
-        val store = com.roadwatch.data.HazardStore(ctx)
-        val key = com.roadwatch.data.SeedOverrides.keyOf(h)
-        val userMatch = store.list().find { com.roadwatch.data.SeedOverrides.keyOf(it.hazard) == key }
+        val base = com.roadwatch.prefs.AppPrefs.getBaseUrl(ctx).trim()
+        val isAdmin = com.roadwatch.app.BuildConfig.IS_ADMIN && !com.roadwatch.prefs.AppPrefs.getAdminAccess(ctx).isNullOrEmpty()
+        val deviceToken = com.roadwatch.prefs.AppPrefs.getDeviceToken(ctx)
+        val hasServerId = !h.id.isNullOrEmpty() && base.isNotEmpty()
 
-        // If it's a user hazard, jump straight into the edit dialog.
-        if (userMatch != null) {
-            showEditDialog(userMatch)
+        val actions = mutableListOf<String>()
+        // Public actions
+        if (hasServerId && !deviceToken.isNullOrEmpty()) {
+            // We could fetch voteStatus to choose label; keep both for simplicity
+            actions += "Add Vote"
+            actions += "Remove Vote"
+        }
+        // Admin actions
+        if (isAdmin && hasServerId) {
+            actions += "Edit Type/Direction"
+            actions += "Move Pin"
+            actions += "Delete"
+        }
+        if (actions.isEmpty()) {
+            com.roadwatch.ui.UiAlerts.info(view, "No server actions available. Configure Base URL, register device, or login as admin.")
             return
         }
-
-        // For seed hazards, provide quick edit affordances: hide/show or create an editable copy.
-        val isActive = h.active && !com.roadwatch.data.SeedOverrides.isDisabled(ctx, key)
-        val toggleLabel = if (isActive) "Hide (Mark Inactive)" else "Show (Mark Active)"
-        val niceType = h.type.name.lowercase().replace('_',' ').replaceFirstChar { it.uppercase() }
-
-        android.app.AlertDialog.Builder(ctx)
-            .setTitle("Manage: $niceType")
-            .setMessage(
-                "This is a seed hazard. You can hide/show it, or make an editable copy to change type or move the pin."
-            )
-            .setPositiveButton(toggleLabel) { _, _ ->
-                com.roadwatch.data.SeedOverrides.setDisabled(ctx, key, isActive)
-                notifyRefresh()
-            }
-            .setNeutralButton("Make Editable Copy") { _, _ ->
-                val created = createEditableCopyFromSeed(h)
-                if (created != null) {
-                    showEditDialog(created)
-                } else {
-                    com.roadwatch.ui.UiAlerts.error(view, "Could not create editable copy")
+        // Adapt vote label from voteStatus when available
+        val labels = actions.toMutableList()
+        try {
+            val email = com.roadwatch.prefs.AppPrefs.getAccountEmail(ctx)
+            val password = com.roadwatch.prefs.AppPrefs.getAccountPassword(ctx)
+            if (hasServerId && !email.isNullOrEmpty() && !password.isNullOrEmpty()) {
+                val vs = com.roadwatch.network.ApiClient.voteStatusWithBasic(base, email, password, h.id!!)
+                if (vs.isSuccess) {
+                    val hasVoted = vs.getOrNull()!!.has_voted == true
+                    val idxAdd = labels.indexOf("Add Vote")
+                    val idxRemove = labels.indexOf("Remove Vote")
+                    if (hasVoted && idxAdd >= 0) labels[idxAdd] = "Remove Vote" // consolidate
+                    if (!hasVoted && idxRemove >= 0) labels[idxRemove] = "Add Vote"
                 }
             }
-            .setNegativeButton("Cancel", null)
+        } catch (_: Exception) {}
+
+        android.app.AlertDialog.Builder(ctx)
+            .setTitle("Manage: ${h.type.name}")
+            .setItems(labels.toTypedArray()) { _, which ->
+                when (labels[which]) {
+                    "Add Vote" -> {
+                        val email = com.roadwatch.prefs.AppPrefs.getAccountEmail(ctx)
+                        val password = com.roadwatch.prefs.AppPrefs.getAccountPassword(ctx)
+                        if (hasServerId && !email.isNullOrEmpty() && !password.isNullOrEmpty()) {
+                            val r = com.roadwatch.network.ApiClient.upvoteWithBasic(base, email, password, h.id!!)
+                            if (r.isSuccess) com.roadwatch.ui.UiAlerts.success(view, "Voted") else com.roadwatch.ui.UiAlerts.error(view, "Vote failed")
+                        }
+                    }
+                    "Remove Vote" -> {
+                        val email = com.roadwatch.prefs.AppPrefs.getAccountEmail(ctx)
+                        val password = com.roadwatch.prefs.AppPrefs.getAccountPassword(ctx)
+                        if (hasServerId && !email.isNullOrEmpty() && !password.isNullOrEmpty()) {
+                            val r = com.roadwatch.network.ApiClient.unvoteWithBasic(base, email, password, h.id!!)
+                            if (r.isSuccess) com.roadwatch.ui.UiAlerts.success(view, "Vote removed") else com.roadwatch.ui.UiAlerts.error(view, "Unvote failed")
+                        }
+                    }
+                    "Edit Type/Direction" -> {
+                        if (!(isAdmin && hasServerId)) return@setItems
+                        val dialogView = layoutInflater.inflate(com.roadwatch.app.R.layout.dialog_edit_hazard, null)
+                        val radioGroup = dialogView.findViewById<android.widget.RadioGroup>(com.roadwatch.app.R.id.radio_group_directionality)
+                        val spinner = dialogView.findViewById<android.widget.Spinner>(com.roadwatch.app.R.id.spinner_hazard_type)
+                        val hazardTypes = com.roadwatch.data.HazardType.values().map { it.name }
+                        val adapter = android.widget.ArrayAdapter(ctx, android.R.layout.simple_spinner_dropdown_item, hazardTypes)
+                        spinner.adapter = adapter
+                        spinner.setSelection(hazardTypes.indexOf(h.type.name))
+                        when (h.directionality.uppercase()) {
+                            "ONE_WAY" -> radioGroup.check(com.roadwatch.app.R.id.radio_one_way)
+                            "BIDIRECTIONAL" -> radioGroup.check(com.roadwatch.app.R.id.radio_two_way)
+                            "OPPOSITE" -> radioGroup.check(com.roadwatch.app.R.id.radio_opposite)
+                        }
+                        android.app.AlertDialog.Builder(ctx)
+                            .setView(dialogView)
+                            .setPositiveButton("Save") { _, _ ->
+                                val newDirectionality = when (radioGroup.checkedRadioButtonId) {
+                                    com.roadwatch.app.R.id.radio_one_way -> "ONE_WAY"
+                                    com.roadwatch.app.R.id.radio_two_way -> "BIDIRECTIONAL"
+                                    com.roadwatch.app.R.id.radio_opposite -> "OPPOSITE"
+                                    else -> h.directionality
+                                }
+                                val newType = try { com.roadwatch.data.HazardType.valueOf(spinner.selectedItem as String).name } catch (_: Exception) { null }
+                                val patch = org.json.JSONObject().put("directionality", newDirectionality)
+                                if (newType != null) patch.put("type", newType)
+                                val r = com.roadwatch.network.AdminClient.patchHazardWithRefresh(ctx, base, h.id!!, patch)
+                                if (r.isSuccess) com.roadwatch.ui.UiAlerts.success(view, "Updated") else com.roadwatch.ui.UiAlerts.error(view, "Update failed")
+                            }
+                            .setNegativeButton("Cancel", null)
+                            .show()
+                    }
+                    "Move Pin" -> {
+                        if (!(isAdmin && hasServerId)) return@setItems
+                        startMovePinServer(h)
+                    }
+                    "Delete" -> {
+                        if (!(isAdmin && hasServerId)) return@setItems
+                        val r = com.roadwatch.network.AdminClient.deleteHazardWithRefresh(ctx, base, h.id!!)
+                        if (r.isSuccess) com.roadwatch.ui.UiAlerts.success(view, "Deleted") else com.roadwatch.ui.UiAlerts.error(view, "Delete failed")
+                    }
+                }
+            }
             .show()
     }
 
@@ -762,11 +872,19 @@ class DriveHudFragment : Fragment() {
     }
 
     private var pendingMove: com.roadwatch.data.UserHazard? = null
+    private var pendingServerMoveId: String? = null
     private fun startMovePin(u: com.roadwatch.data.UserHazard) {
         pendingMove = u
         com.roadwatch.ui.UiAlerts.info(view, "Tap map to set new location for this hazard.")
         googleMap?.setOnMapClickListener { latLng ->
             finalizeMovePin(latLng)
+        }
+    }
+    private fun startMovePinServer(h: com.roadwatch.data.Hazard) {
+        pendingServerMoveId = h.id
+        com.roadwatch.ui.UiAlerts.info(view, "Tap map to set new server location for this hazard.")
+        googleMap?.setOnMapClickListener { latLng ->
+            finalizeMovePinServer(latLng)
         }
     }
     private fun finalizeMovePin(latLng: com.google.android.gms.maps.model.LatLng) {
@@ -780,6 +898,16 @@ class DriveHudFragment : Fragment() {
         pendingMove = null
         notifyRefresh()
         com.roadwatch.ui.UiAlerts.success(view, "Location updated")
+    }
+    private fun finalizeMovePinServer(latLng: com.google.android.gms.maps.model.LatLng) {
+        val id = pendingServerMoveId ?: return
+        val ctx = requireContext()
+        val base = com.roadwatch.prefs.AppPrefs.getBaseUrl(ctx).trim()
+        val patch = org.json.JSONObject().put("lat", latLng.latitude).put("lng", latLng.longitude)
+        val r = com.roadwatch.network.AdminClient.patchHazardWithRefresh(ctx, base, id, patch)
+        googleMap?.setOnMapClickListener(null)
+        pendingServerMoveId = null
+        if (r.isSuccess) com.roadwatch.ui.UiAlerts.success(view, "Location updated") else com.roadwatch.ui.UiAlerts.error(view, "Update failed")
     }
 
     private fun notifyRefresh() {

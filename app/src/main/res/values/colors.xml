@@ -1,38 +1,37 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- RoadWatch brand palette -->
-    <color name="primary">#FF6B00</color> <!-- Safety Orange -->
+    <color name="purple_200">#FFBB86FC</color>
+    <color name="purple_500">#FF6200EE</color>
+    <color name="purple_700">#FF3700B3</color>
+    <color name="teal_200">#FF03DAC5</color>
+    <color name="teal_700">#FF018786</color>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+
+    <!-- App-specific colors -->
+    <color name="primary">#FF5722</color>
+    <color name="primary_variant">#E64A19</color>
     <color name="on_primary">#FFFFFF</color>
-    <color name="primary_container">#FFE3CC</color>
-    <color name="on_primary_container">#2C2C2C</color>
-
-    <color name="secondary">#2C2C2C</color> <!-- Asphalt Grey -->
-    <color name="on_secondary">#FFFFFF</color>
-    <color name="secondary_container">#E0E0E0</color>
-    <color name="on_secondary_container">#2C2C2C</color>
-
-    <color name="tertiary">#1DB954</color> <!-- Signal Green (accent) -->
-    <color name="on_tertiary">#FFFFFF</color>
-    <color name="tertiary_container">#D9F5E5</color>
-    <color name="on_tertiary_container">#0F5E2C</color>
-
-    <color name="error">#E63946</color> <!-- Hazard Red -->
-    <color name="on_error">#FFFFFF</color>
-    <color name="error_container">#FAD0D3</color>
-    <color name="on_error_container">#5F0A10</color>
-
-    <color name="background">#F5F5F5</color> <!-- Light Concrete -->
-    <color name="on_background">#2C2C2C</color>
+    <color name="secondary">#FFC107</color>
+    <color name="secondary_variant">#FFA000</color>
+    <color name="on_secondary">#000000</color>
     <color name="surface">#FFFFFF</color>
-    <color name="on_surface">#2C2C2C</color>
+    <color name="on_surface">#000000</color>
+    <color name="on_surface_variant">#8A000000</color>
+    <color name="background">#FAFAFA</color>
+    <color name="error">#B00020</color>
+    <color name="primary_container">#FFCCBC</color>
+    <color name="on_primary_container">#212121</color>
+    <color name="tertiary">#757575</color>
+    <color name="on_tertiary">#FFFFFF</color>
+    <color name="on_error">#FFFFFF</color>
+    <color name="on_background">#000000</color>
     <color name="surface_variant">#EEEEEE</color>
-    <color name="on_surface_variant">#4A4A4A</color>
-    <color name="outline">#9E9E9E</color>
-    <color name="surface_container">#FFFFFF</color>
-    <color name="surface_container_high">#FAFAFA</color>
-    <color name="surface_container_highest">#F5F5F5</color>
-    <color name="surface_container_low">#FFFFFF</color>
+    <color name="outline">#BDBDBD</color>
 
-    <!-- Additional accent alias for convenience -->
-    <color name="accent">#1DB954</color>
+    <!-- Alert colors -->
+    <color name="alert_critical">#D32F2F</color>
+    <color name="alert_warning">#FFA000</color>
+    <color name="alert_hazard_approaching">#1976D2</color>
+    <color name="surface_container_high">#F5F5F5</color>
 </resources>

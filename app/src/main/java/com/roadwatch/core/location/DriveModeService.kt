@@ -48,6 +48,7 @@ class DriveModeService : Service(), LocationListener {
 
     override fun onLocationChanged(location: Location) {
         lastKnownLocation = location
+        try { com.roadwatch.prefs.AppPrefs.setLastLocation(this, location.latitude, location.longitude) } catch (_: Exception) {}
         alerts?.onLocationUpdate(location)
     }
 

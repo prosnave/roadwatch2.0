@@ -65,6 +65,21 @@ class SettingsFragment : Fragment() {
         val btnZoneSave = view.findViewById<Button>(R.id.btn_zone_save)
         val switchCluster = view.findViewById<android.widget.Switch>(R.id.switch_cluster_enabled)
         val edtClusterSpeed = view.findViewById<android.widget.EditText>(R.id.edt_cluster_speed)
+        val edtBaseUrl = view.findViewById<android.widget.EditText>(R.id.edt_base_url)
+        val btnSaveBaseUrl = view.findViewById<Button>(R.id.btn_save_base_url)
+        // Account (Basic) credentials and registration
+        val edtAccountEmail = view.findViewById<android.widget.EditText?>(R.id.edt_account_email)
+        val edtAccountPassword = view.findViewById<android.widget.EditText?>(R.id.edt_account_password)
+        val btnSaveAccount = view.findViewById<Button?>(R.id.btn_save_account)
+        val btnRegisterAccount = view.findViewById<Button?>(R.id.btn_register_account)
+        val edtSyncRadius = view.findViewById<android.widget.EditText>(R.id.edt_sync_radius)
+        val btnSaveSyncRadius = view.findViewById<Button>(R.id.btn_save_sync_radius)
+        // Admin auth controls (added below the Server section if present)
+        val edtAdminEmail = view.findViewById<android.widget.EditText?>(R.id.edt_admin_email)
+        val edtAdminPassword = view.findViewById<android.widget.EditText?>(R.id.edt_admin_password)
+        val btnAdminLogin = view.findViewById<Button?>(R.id.btn_admin_login)
+        val btnAdminLogout = view.findViewById<Button?>(R.id.btn_admin_logout)
+        val txtAdminStatus = view.findViewById<android.widget.TextView?>(R.id.txt_admin_status)
 
         // Admin/Public: show button with different label
         val isAdmin = BuildConfig.IS_ADMIN
@@ -94,6 +109,97 @@ class SettingsFragment : Fragment() {
 
         // Initialize data-driven visibilities
         refreshDataButtons()
+
+        // Initialize server settings
+        edtBaseUrl.setText(com.roadwatch.prefs.AppPrefs.getBaseUrl(requireContext()))
+        edtAccountEmail?.setText(com.roadwatch.prefs.AppPrefs.getAccountEmail(requireContext()) ?: "")
+        edtAccountPassword?.setText(com.roadwatch.prefs.AppPrefs.getAccountPassword(requireContext()) ?: "")
+        edtSyncRadius.setText(com.roadwatch.prefs.AppPrefs.getSyncRadiusMeters(requireContext()).toString())
+        txtAdminStatus?.text = if (com.roadwatch.prefs.AppPrefs.getAdminAccess(requireContext()).isNullOrEmpty()) "Admin: Logged out" else "Admin: Logged in"
+
+        btnSaveBaseUrl.setOnClickListener {
+            val url = edtBaseUrl.text.toString().trim()
+            com.roadwatch.prefs.AppPrefs.setBaseUrl(requireContext(), url)
+            status.text = if (url.isNotEmpty()) "Base URL saved" else "Base URL cleared"
+        }
+        btnSaveSyncRadius.setOnClickListener {
+            val meters = edtSyncRadius.text.toString().toIntOrNull() ?: 3000
+            com.roadwatch.prefs.AppPrefs.setSyncRadiusMeters(requireContext(), meters)
+            edtSyncRadius.setText(com.roadwatch.prefs.AppPrefs.getSyncRadiusMeters(requireContext()).toString())
+            status.text = "Sync radius saved"
+        }
+        btnSaveAccount?.setOnClickListener {
+            val email = edtAccountEmail?.text?.toString()?.trim().orEmpty()
+            val password = edtAccountPassword?.text?.toString()?.trim().orEmpty()
+            com.roadwatch.prefs.AppPrefs.setAccountCredentials(requireContext(), email.ifBlank { null }, password.ifBlank { null })
+            status.text = if (email.isNotBlank()) "Account saved" else "Account cleared"
+        }
+        btnRegisterAccount?.setOnClickListener {
+            val baseUrl = com.roadwatch.prefs.AppPrefs.getBaseUrl(requireContext()).trim()
+            if (baseUrl.isEmpty()) { status.text = "Set Base URL first"; return@setOnClickListener }
+            val email = edtAccountEmail?.text?.toString()?.trim().orEmpty()
+            val password = edtAccountPassword?.text?.toString()?.trim().orEmpty()
+            if (email.isEmpty() || password.isEmpty()) { status.text = "Enter email and password"; return@setOnClickListener }
+            ioScope.launch {
+                val result = com.roadwatch.network.ApiClient.registerAccount(baseUrl, email, password)
+                requireActivity().runOnUiThread {
+                    status.text = if (result.isSuccess) "Account registered" else "Register failed: ${result.exceptionOrNull()?.message ?: "error"}"
+                }
+            }
+        }
+
+        // Settings sync (push/pull)
+        val btnPushSettings = view.findViewById<Button?>(R.id.btn_push_settings)
+        val btnPullSettings = view.findViewById<Button?>(R.id.btn_pull_settings)
+        btnPushSettings?.setOnClickListener {
+            val baseUrl = com.roadwatch.prefs.AppPrefs.getBaseUrl(requireContext()).trim()
+            val email = com.roadwatch.prefs.AppPrefs.getAccountEmail(requireContext()) ?: return@setOnClickListener.also { status.text = "Save account first" }
+            val password = com.roadwatch.prefs.AppPrefs.getAccountPassword(requireContext()) ?: return@setOnClickListener.also { status.text = "Save account first" }
+            val settings = collectSettings()
+            ioScope.launch {
+                val res = com.roadwatch.network.ApiClient.putAccountSettings(baseUrl, email, password, settings)
+                requireActivity().runOnUiThread { status.text = if (res.isSuccess) "Settings saved to account" else "Save failed" }
+            }
+        }
+        btnPullSettings?.setOnClickListener {
+            val baseUrl = com.roadwatch.prefs.AppPrefs.getBaseUrl(requireContext()).trim()
+            val email = com.roadwatch.prefs.AppPrefs.getAccountEmail(requireContext()) ?: return@setOnClickListener.also { status.text = "Save account first" }
+            val password = com.roadwatch.prefs.AppPrefs.getAccountPassword(requireContext()) ?: return@setOnClickListener.also { status.text = "Save account first" }
+            ioScope.launch {
+                val res = com.roadwatch.network.ApiClient.getAccountSettings(baseUrl, email, password)
+                requireActivity().runOnUiThread {
+                    if (res.isSuccess) {
+                        applySettings(res.getOrNull()!!)
+                        status.text = "Settings loaded from account"
+                    } else status.text = "Load failed"
+                }
+            }
+        }
+        btnAdminLogin?.setOnClickListener {
+            val baseUrl = com.roadwatch.prefs.AppPrefs.getBaseUrl(requireContext()).trim()
+            if (baseUrl.isEmpty()) { status.text = "Set Base URL first"; return@setOnClickListener }
+            val email = edtAdminEmail?.text?.toString()?.trim().orEmpty()
+            val password = edtAdminPassword?.text?.toString()?.trim().orEmpty()
+            if (email.isEmpty() || password.isEmpty()) { status.text = "Enter admin credentials"; return@setOnClickListener }
+            ioScope.launch {
+                val res = com.roadwatch.network.ApiClient.adminLogin(baseUrl, email, password)
+                requireActivity().runOnUiThread {
+                    if (res.isSuccess) {
+                        val (access, refresh, _) = res.getOrNull()!!
+                        com.roadwatch.prefs.AppPrefs.setAdminTokens(requireContext(), access, refresh)
+                        txtAdminStatus?.text = "Admin: Logged in"
+                        status.text = "Admin login successful"
+                    } else {
+                        status.text = "Admin login failed: ${res.exceptionOrNull()?.message ?: "error"}"
+                    }
+                }
+            }
+        }
+        btnAdminLogout?.setOnClickListener {
+            com.roadwatch.prefs.AppPrefs.setAdminTokens(requireContext(), null, null)
+            txtAdminStatus?.text = "Admin: Logged out"
+            status.text = "Admin logged out"
+        }
 
         btnReload.setOnClickListener {
             android.app.AlertDialog.Builder(requireContext())
@@ -395,6 +501,44 @@ class SettingsFragment : Fragment() {
         }
     }
     private var pendingBgCallback: ((Boolean) -> Unit)? = null
+
+    // Serialize current preferences into a JSON object for account sync
+    private fun collectSettings(): org.json.JSONObject {
+        val ctx = requireContext()
+        return org.json.JSONObject().apply {
+            put("audio_enabled", com.roadwatch.prefs.AppPrefs.isAudioEnabled(ctx))
+            put("visual_enabled", com.roadwatch.prefs.AppPrefs.isVisualEnabled(ctx))
+            put("haptics_enabled", com.roadwatch.prefs.AppPrefs.isHapticsEnabled(ctx))
+            put("background_alerts", com.roadwatch.prefs.AppPrefs.isBackgroundAlerts(ctx))
+            put("audio_focus", com.roadwatch.prefs.AppPrefs.getAudioFocusMode(ctx))
+            put("speed_curve", com.roadwatch.prefs.AppPrefs.getSpeedCurve(ctx))
+            put("zone_enter_msg", com.roadwatch.prefs.AppPrefs.getZoneEnter(ctx))
+            put("zone_exit_msg", com.roadwatch.prefs.AppPrefs.getZoneExit(ctx))
+            put("zone_repeat_ms", com.roadwatch.prefs.AppPrefs.getZoneRepeatMs(ctx))
+            put("cluster_enabled", com.roadwatch.prefs.AppPrefs.isClusterEnabled(ctx))
+            put("cluster_speed_kph", com.roadwatch.prefs.AppPrefs.getClusterSpeedThreshold(ctx))
+            put("default_mute_min", com.roadwatch.prefs.AppPrefs.getDefaultMuteMinutes(ctx))
+        }
+    }
+
+    // Apply JSON settings into local preferences
+    private fun applySettings(json: org.json.JSONObject) {
+        val ctx = requireContext()
+        fun optBool(key: String, def: Boolean) = if (json.has(key)) json.optBoolean(key, def) else def
+        fun optInt(key: String, def: Int) = if (json.has(key)) json.optInt(key, def) else def
+        fun optLong(key: String, def: Long) = if (json.has(key)) json.optLong(key, def) else def
+        fun optString(key: String, def: String) = if (json.has(key)) json.optString(key, def) else def
+
+        com.roadwatch.prefs.AppPrefs.setAlertChannels(ctx, optBool("audio_enabled", true), optBool("visual_enabled", true))
+        com.roadwatch.prefs.AppPrefs.setHapticsEnabled(ctx, optBool("haptics_enabled", true))
+        com.roadwatch.prefs.AppPrefs.setBackgroundAlerts(ctx, optBool("background_alerts", false))
+        com.roadwatch.prefs.AppPrefs.setAudioFocusMode(ctx, optString("audio_focus", "DUCK"))
+        com.roadwatch.prefs.AppPrefs.setSpeedCurve(ctx, optString("speed_curve", "NORMAL"))
+        com.roadwatch.prefs.AppPrefs.setZoneConfig(ctx, optString("zone_enter_msg", com.roadwatch.prefs.AppPrefs.getZoneEnter(ctx)), optString("zone_exit_msg", com.roadwatch.prefs.AppPrefs.getZoneExit(ctx)), optLong("zone_repeat_ms", com.roadwatch.prefs.AppPrefs.getZoneRepeatMs(ctx)))
+        com.roadwatch.prefs.AppPrefs.setClusterEnabled(ctx, optBool("cluster_enabled", true))
+        com.roadwatch.prefs.AppPrefs.setClusterSpeedThreshold(ctx, optInt("cluster_speed_kph", com.roadwatch.prefs.AppPrefs.getClusterSpeedThreshold(ctx)))
+        com.roadwatch.prefs.AppPrefs.setDefaultMuteMinutes(ctx, optInt("default_mute_min", com.roadwatch.prefs.AppPrefs.getDefaultMuteMinutes(ctx)))
+    }
 }
 
 // Import helpers

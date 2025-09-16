@@ -18,6 +18,9 @@ data class Hazard(
     val zoneStartLng: Double? = null,
     val zoneEndLat: Double? = null,
     val zoneEndLng: Double? = null,
+    val id: String? = null,
+    val updatedAt: Instant = Instant.EPOCH,
+    val votesCount: Int = 0,
 )
 
 data class SeedLoadResult(
