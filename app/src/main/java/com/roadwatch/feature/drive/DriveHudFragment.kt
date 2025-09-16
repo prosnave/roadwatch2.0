@@ -204,6 +204,9 @@ class DriveHudFragment : Fragment() {
             lastMoveTime = now
         }
 
+        // Default the speed card to neutral styling until the first hazard evaluation runs.
+        updateSpeedCardStyle(null)
+
         // Prompt for DND bypass so alerts can play in Silent/DND
         ensureDndAccessPrompt()
     }
@@ -270,8 +273,8 @@ class DriveHudFragment : Fragment() {
                 override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
                     when (intent?.action) {
                         "com.roadwatch.ALERT_OVERLAY" -> {
-                            val text = intent.getStringExtra("text") ?: return
-                            showAlertOverlay(text)
+                            // Audio cues already inform the driver; suppress duplicate popup UI.
+                            view?.findViewById<com.google.android.material.card.MaterialCardView>(R.id.alert_overlay)?.visibility = View.GONE
                         }
                         "com.roadwatch.REFRESH_HAZARDS" -> refreshMarkers()
                     }
@@ -403,19 +406,6 @@ class DriveHudFragment : Fragment() {
         parentFragmentManager.popBackStack()
     }
 
-    private fun showAlertOverlay(text: String) {
-        val card = view?.findViewById<com.google.android.material.card.MaterialCardView>(R.id.alert_overlay) ?: return
-        val tv = view?.findViewById<android.widget.TextView>(R.id.alert_text) ?: return
-        tv.text = text
-        card.alpha = 0f
-        card.visibility = View.VISIBLE
-        card.animate().alpha(1f).setDuration(150).withEndAction {
-            card.postDelayed({
-                try { card.animate().alpha(0f).setDuration(200).withEndAction { card.visibility = View.GONE }.start() } catch (_: Exception) {}
-            }, 3500L)
-        }.start()
-    }
-
     // --- Prerequisites: notifications allowed, location permission, location services on ---
     private fun ensurePrerequisitesOrExit() {
         // Notifications
@@ -518,6 +508,7 @@ class DriveHudFragment : Fragment() {
         if (!location.hasBearing() || location.speed < 1.0f) {
             chip.visibility = View.GONE
             subtitle?.text = ""
+            updateSpeedCardStyle(null)
             return
         }
 
@@ -554,10 +545,68 @@ class DriveHudFragment : Fragment() {
             chipText.text = text
             chip.visibility = View.VISIBLE
             subtitle?.text = "Next: ${type} • ${formatNiceDistance(bestDist)}"
+            updateSpeedCardStyle(bestAlong)
         } else {
             chip.visibility = View.GONE
             subtitle?.text = ""
+            updateSpeedCardStyle(null)
         }
+    }
+
+    private fun updateSpeedCardStyle(nextAlongMeters: Double?) {
+        val card = view?.findViewById<com.google.android.material.card.MaterialCardView>(R.id.speed_card) ?: return
+        val ctx = card.context
+        val neutralBg = ContextCompat.getColor(ctx, R.color.surface)
+        val neutralFg = ContextCompat.getColor(ctx, R.color.on_surface)
+        val neutralStroke = ContextCompat.getColor(ctx, R.color.outline)
+        val cautionBg = ContextCompat.getColor(ctx, R.color.primary_container)
+        val cautionFg = ContextCompat.getColor(ctx, R.color.on_primary_container)
+        val cautionStroke = ContextCompat.getColor(ctx, R.color.primary)
+        val warnBg = ContextCompat.getColor(ctx, R.color.error_container)
+        val warnFg = ContextCompat.getColor(ctx, R.color.on_error_container)
+
+        var bg = neutralBg
+        var fg = neutralFg
+        var stroke = neutralStroke
+        var subtitleColor = ContextCompat.getColor(ctx, R.color.on_surface_variant)
+
+        if (nextAlongMeters != null) {
+            when {
+                nextAlongMeters <= 75.0 -> {
+                    bg = warnBg
+                    fg = warnFg
+                    stroke = warnBg
+                    subtitleColor = warnFg
+                }
+                nextAlongMeters <= 200.0 -> {
+                    bg = cautionBg
+                    fg = cautionFg
+                    stroke = cautionStroke
+                    subtitleColor = cautionFg
+                }
+                else -> {
+                    bg = neutralBg
+                    fg = neutralFg
+                    stroke = neutralStroke
+                    subtitleColor = ContextCompat.getColor(ctx, R.color.on_surface_variant)
+                }
+            }
+        }
+
+        card.setCardBackgroundColor(bg)
+        card.strokeWidth = if (stroke == neutralStroke) 0 else dp(2)
+        card.setStrokeColor(stroke)
+
+        val subtitle = view?.findViewById<android.widget.TextView>(R.id.txt_next_subtitle)
+        subtitle?.setTextColor(subtitleColor)
+
+        val labels = listOfNotNull(
+            txtSpeed,
+            txtBearing,
+            view?.findViewById<android.widget.TextView>(R.id.txt_speed_label),
+            view?.findViewById<android.widget.TextView>(R.id.txt_direction_label)
+        )
+        labels.forEach { it.setTextColor(fg) }
     }
 
     private fun targetPoint(h: com.roadwatch.data.Hazard): Pair<Double, Double> {
@@ -716,7 +765,7 @@ class DriveHudFragment : Fragment() {
         val radioGroup = dialogView.findViewById<android.widget.RadioGroup>(com.roadwatch.app.R.id.radio_group_directionality)
         val spinner = dialogView.findViewById<android.widget.Spinner>(com.roadwatch.app.R.id.spinner_hazard_type)
         val quickLabel = dialogView.findViewById<android.widget.TextView>(com.roadwatch.app.R.id.txt_quick_actions)
-        val btnMyLane = dialogView.findViewById<com.google.android.material.button.MaterialButton>(com.roadwatch.app.R.id.btn_quick_my_lane)
+        val btnOppositeLane = dialogView.findViewById<com.google.android.material.button.MaterialButton>(com.roadwatch.app.R.id.btn_quick_opposite_lane)
         val btnDelete = dialogView.findViewById<com.google.android.material.button.MaterialButton>(com.roadwatch.app.R.id.btn_delete_hazard)
 
         val hazardTypes = com.roadwatch.data.HazardType.values()
@@ -766,26 +815,26 @@ class DriveHudFragment : Fragment() {
 
         if (com.roadwatch.app.BuildConfig.IS_ADMIN) {
             quickLabel?.visibility = View.VISIBLE
-            btnMyLane?.visibility = View.VISIBLE
+            btnOppositeLane?.visibility = View.VISIBLE
             btnDelete?.visibility = View.VISIBLE
 
-            btnMyLane?.setOnClickListener {
+            btnOppositeLane?.setOnClickListener {
                 val loc = com.roadwatch.core.location.DriveModeService.lastKnownLocation
-                if (loc == null || !loc.hasBearing()) {
-                    com.roadwatch.ui.UiAlerts.error(view, "Need a GPS heading to mark the lane")
-                    return@setOnClickListener
+                val baseHeading = when {
+                    loc != null && loc.hasBearing() -> loc.bearing
+                    else -> u.hazard.reportedHeadingDeg
                 }
-                val heading = normalizeBearing(loc.bearing)
+                val opposite = normalizeBearing(baseHeading + 180f)
                 val updated = u.hazard.copy(
-                    directionality = "ONE_WAY",
-                    reportedHeadingDeg = heading,
-                    userBearing = heading,
+                    directionality = "OPPOSITE",
+                    reportedHeadingDeg = opposite,
+                    userBearing = opposite,
                 )
                 val originalKey = com.roadwatch.data.SeedOverrides.keyOf(u.hazard)
                 if (store.upsertByKey(originalKey, updated)) {
                     notifyRefresh()
                     refreshMarkers()
-                    com.roadwatch.ui.UiAlerts.success(view, "Targeting this lane")
+                    com.roadwatch.ui.UiAlerts.success(view, "Marked for opposite lane")
                     dialog.dismiss()
                 } else {
                     com.roadwatch.ui.UiAlerts.error(view, "Update failed")
