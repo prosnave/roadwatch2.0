@@ -38,6 +38,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.activity.result.contract.ActivityResultContracts
 
 class DriveHudFragment : Fragment() {
     private val ioScope = CoroutineScope(Dispatchers.IO)
@@ -53,6 +54,29 @@ class DriveHudFragment : Fragment() {
     private val idleTimeoutMs = 120_000L
     private var providersReceiver: BroadcastReceiver? = null
     private var overlayReceiver: BroadcastReceiver? = null
+
+    private val requestPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
+            permissions.entries.forEach {
+                val permission = it.key
+                val isGranted = it.value
+                if (permission == Manifest.permission.ACCESS_FINE_LOCATION) {
+                    if (isGranted) {
+                        enableMyLocation()
+                    } else {
+                        Toast.makeText(requireContext(), "Location permission required", Toast.LENGTH_SHORT).show()
+                        parentFragmentManager.popBackStack()
+                    }
+                }
+                if (permission == Manifest.permission.POST_NOTIFICATIONS) {
+                    if (!isGranted) {
+                        Toast.makeText(requireContext(), "Notifications are required for alerts", Toast.LENGTH_SHORT).show()
+                        parentFragmentManager.popBackStack()
+                    }
+                }
+            }
+        }
+
     private val locListener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
             googleMap?.isMyLocationEnabled = hasFinePermission()
@@ -85,12 +109,12 @@ class DriveHudFragment : Fragment() {
         ensurePrerequisitesOrExit()
 
         // Setup map
-        val tag = "drive_map"
-        var mapFragment = childFragmentManager.findFragmentByTag(tag) as? SupportMapFragment
+        val mapTag = "drive_map"
+        var mapFragment = childFragmentManager.findFragmentByTag(mapTag) as? SupportMapFragment
         if (mapFragment == null) {
             mapFragment = SupportMapFragment.newInstance()
             childFragmentManager.beginTransaction()
-                .replace(R.id.map_container, mapFragment, tag)
+                .replace(R.id.map_container, mapFragment, mapTag)
                 .commitNow()
         }
         mapFragment.getMapAsync { gMap ->
@@ -123,9 +147,9 @@ class DriveHudFragment : Fragment() {
 
             // Open editor when a hazard marker is tapped
             gMap.setOnMarkerClickListener { marker ->
-                val tag = marker.tag
-                if (tag is com.roadwatch.data.Hazard) {
-                    openHazardEditor(tag)
+                val markerTag = marker.tag
+                if (markerTag is com.roadwatch.data.Hazard) {
+                    openHazardEditor(markerTag)
                     true
                 } else {
                     false
@@ -186,7 +210,7 @@ class DriveHudFragment : Fragment() {
 
     private fun enableMyLocation() {
         if (!hasFinePermission()) {
-            requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), REQ_LOC_FINE)
+            requestPermissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION))
             return
         }
         googleMap?.isMyLocationEnabled = true
@@ -207,27 +231,6 @@ class DriveHudFragment : Fragment() {
 
     private fun stopLocationUpdates() {
         try { lm?.removeUpdates(locListener) } catch (_: Exception) {}
-    }
-
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == REQ_LOC_FINE) {
-            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                enableMyLocation()
-            }
-            else {
-                // Without location we exit Drive Mode
-                Toast.makeText(requireContext(), "Location permission required", Toast.LENGTH_SHORT).show()
-                parentFragmentManager.popBackStack()
-            }
-        }
-        if (requestCode == REQ_NOTIF && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-            val granted = grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
-            if (!granted) {
-                Toast.makeText(requireContext(), "Notifications are required for alerts", Toast.LENGTH_SHORT).show()
-                parentFragmentManager.popBackStack()
-            }
-        }
     }
 
     override fun onDestroyView() {
@@ -293,8 +296,6 @@ class DriveHudFragment : Fragment() {
     }
 
     companion object {
-        private const val REQ_LOC_FINE = 2001
-        private const val REQ_NOTIF = 2002
         private const val MIN_HEADING_AGREE_DEG = 15.0
         private const val ONE_WAY_MAX_HEADING_DEG = 10.0
         private const val MAX_LATERAL_OFFSET_METERS = 7.0
@@ -326,7 +327,7 @@ class DriveHudFragment : Fragment() {
         var best: android.location.Location? = null
         for (p in providers) {
             val l = lm.getLastKnownLocation(p) ?: continue
-            if (best == null || l.accuracy < best!!.accuracy) best = l
+            if (best == null || l.accuracy < best.accuracy) best = l
         }
         return best
     }
@@ -421,7 +422,7 @@ class DriveHudFragment : Fragment() {
         if (!NotificationManagerCompat.from(requireContext()).areNotificationsEnabled()) {
             // On Android 13+, request POST_NOTIFICATIONS; otherwise guide to settings
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQ_NOTIF)
+                requestPermissionLauncher.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
             } else {
                 android.app.AlertDialog.Builder(requireContext())
                     .setTitle("Enable notifications")
@@ -453,13 +454,12 @@ class DriveHudFragment : Fragment() {
         // Gate the prompt: only if notifications are disabled or alerts channel has low importance and we haven't prompted recently
         val ctx = requireContext()
         val nm = ctx.getSystemService(android.content.Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
-        var needsPrompt = false
         val channelsOk = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
             val ch = nm.getNotificationChannel(com.roadwatch.notifications.NotificationHelper.CHANNEL_ALERTS)
             ch != null && ch.importance >= android.app.NotificationManager.IMPORTANCE_HIGH
         } else true
         val enabled = androidx.core.app.NotificationManagerCompat.from(ctx).areNotificationsEnabled()
-        needsPrompt = !(enabled && channelsOk)
+        val needsPrompt = !(enabled && channelsOk)
 
         // Throttle: no more than once per 24h
         val last = com.roadwatch.prefs.AppPrefs.getLastDndPromptAt(ctx)

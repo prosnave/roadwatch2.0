@@ -21,9 +21,23 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.activity.result.contract.ActivityResultContracts
 
 class HomeFragment : Fragment() {
     private val ioScope = CoroutineScope(Dispatchers.IO)
+
+    private var pendingLocCallback: (() -> Unit)? = null
+
+    private val requestPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
+            if (isGranted) {
+                pendingLocCallback?.invoke()
+            } else {
+                Toast.makeText(requireContext(), "Location permission is required.", Toast.LENGTH_SHORT).show()
+            }
+            pendingLocCallback = null
+        }
+
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
@@ -90,10 +104,10 @@ class HomeFragment : Fragment() {
                     var best: android.location.Location? = null
                     for (p in providers) {
                         val l = lm.getLastKnownLocation(p) ?: continue
-                        if (best == null || l.accuracy < best!!.accuracy) best = l
+                        if (best == null || l.accuracy < best.accuracy) best = l
                     }
                     if (best != null) {
-                        val d = distanceMeters(lastLat, lastLng, best!!.latitude, best!!.longitude)
+                        val d = distanceMeters(lastLat, lastLng, best.latitude, best.longitude)
                         if (d > 100.0) {
                             android.app.AlertDialog.Builder(requireContext())
                                 .setTitle("Resume Drive Mode?")
@@ -125,8 +139,8 @@ class HomeFragment : Fragment() {
     private fun ensureLocationEnabled(onReady: () -> Unit) {
         val granted = ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
         if (!granted) {
-            requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), REQ_LOC)
             pendingLocCallback = onReady
+            requestPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
             return
         }
         val lm = requireContext().getSystemService(android.content.Context.LOCATION_SERVICE) as LocationManager
@@ -143,24 +157,5 @@ class HomeFragment : Fragment() {
             return
         }
         onReady()
-    }
-
-    private var pendingLocCallback: (() -> Unit)? = null
-
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == REQ_LOC) {
-            val granted = grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
-            if (granted) {
-                pendingLocCallback?.invoke()
-            } else {
-                Toast.makeText(requireContext(), "Location permission is required.", Toast.LENGTH_SHORT).show()
-            }
-            pendingLocCallback = null
-        }
-    }
-
-    companion object {
-        private const val REQ_LOC = 1003
     }
 }

@@ -74,7 +74,6 @@ class AlertManager(private val context: Context) {
                         lastAlertTime = now
 
                         val (label, showType) = clusterLabel(first)
-                        val title = if (first.size == 1) "Hazard ahead" else if (showType) "${label} ahead" else "Hazards ahead"
                         val text = if (first.size == 1) {
                             label + " in " + nearestNiceDistance(startDist)
                         } else {
@@ -127,7 +126,6 @@ class AlertManager(private val context: Context) {
         lastPerHazard[key] = now
         lastAlertTime = now
 
-        val title = "Hazard ahead"
         val dMeters = distanceMeters(loc.latitude, loc.longitude, target.lat, target.lng).roundToInt()
         val friendly = target.type.name.replace('_', ' ').lowercase().replaceFirstChar { it.uppercase() }
         val text = friendly + " in " + nearestNiceDistance(dMeters)
@@ -181,6 +179,7 @@ class AlertManager(private val context: Context) {
                 .build()
             focusGranted = am.requestAudioFocus(afr) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
             tts?.setOnUtteranceProgressListener(object: android.speech.tts.UtteranceProgressListener() {
+                @Suppress("OverridingDeprecatedMember")
                 override fun onStart(utteranceId: String?) {}
                 override fun onError(utteranceId: String?) { am.abandonAudioFocusRequest(afr) }
                 override fun onDone(utteranceId: String?) { am.abandonAudioFocusRequest(afr) }
@@ -208,6 +207,7 @@ class AlertManager(private val context: Context) {
                 .build()
             val granted = am.requestAudioFocus(afr) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
             tts?.setOnUtteranceProgressListener(object: android.speech.tts.UtteranceProgressListener() {
+                @Suppress("OverridingDeprecatedMember")
                 override fun onStart(utteranceId: String?) {}
                 override fun onError(utteranceId: String?) { am.abandonAudioFocusRequest(afr) }
                 override fun onDone(utteranceId: String?) { am.abandonAudioFocusRequest(afr) }
