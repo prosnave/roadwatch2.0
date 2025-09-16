@@ -271,17 +271,12 @@ class DriveHudFragment : Fragment() {
                             showAlertOverlay(text)
                         }
                         "com.roadwatch.REFRESH_HAZARDS" -> refreshMarkers()
-                        "com.roadwatch.HAZARD_REPORTED" -> {
-                            val hazardDetails = intent.getStringExtra("hazard_details") ?: return
-                            showHazardReportedPopup(hazardDetails)
-                        }
                     }
                 }
             }
             val filter = IntentFilter().apply {
                 addAction("com.roadwatch.ALERT_OVERLAY")
                 addAction("com.roadwatch.REFRESH_HAZARDS")
-                addAction("com.roadwatch.HAZARD_REPORTED")
             }
             requireContext().registerReceiver(overlayReceiver, filter)
         }
@@ -405,14 +400,6 @@ class DriveHudFragment : Fragment() {
             }
         } catch (_: Exception) {}
         parentFragmentManager.popBackStack()
-    }
-
-    private fun showHazardReportedPopup(hazardDetails: String) {
-        android.app.AlertDialog.Builder(requireContext())
-            .setTitle("Hazard Reported")
-            .setMessage(hazardDetails)
-            .setPositiveButton("OK", null)
-            .show()
     }
 
     private fun showAlertOverlay(text: String) {
@@ -728,8 +715,13 @@ class DriveHudFragment : Fragment() {
         val dialogView = layoutInflater.inflate(com.roadwatch.app.R.layout.dialog_edit_hazard, null)
         val radioGroup = dialogView.findViewById<android.widget.RadioGroup>(com.roadwatch.app.R.id.radio_group_directionality)
         val spinner = dialogView.findViewById<android.widget.Spinner>(com.roadwatch.app.R.id.spinner_hazard_type)
+        val quickLabel = dialogView.findViewById<android.widget.TextView>(com.roadwatch.app.R.id.txt_quick_actions)
+        val btnMyLane = dialogView.findViewById<com.google.android.material.button.MaterialButton>(com.roadwatch.app.R.id.btn_quick_my_lane)
+        val btnDelete = dialogView.findViewById<com.google.android.material.button.MaterialButton>(com.roadwatch.app.R.id.btn_delete_hazard)
 
-        val hazardTypes = com.roadwatch.data.HazardType.values().filter { it != com.roadwatch.data.HazardType.SPEED_LIMIT_ZONE }.map { it.name }
+        val hazardTypes = com.roadwatch.data.HazardType.values()
+            .filter { it != com.roadwatch.data.HazardType.SPEED_LIMIT_ZONE }
+            .map { it.name }
         val adapter = android.widget.ArrayAdapter(ctx, android.R.layout.simple_spinner_dropdown_item, hazardTypes)
         spinner.adapter = adapter
 
@@ -740,7 +732,13 @@ class DriveHudFragment : Fragment() {
             else -> radioGroup.check(com.roadwatch.app.R.id.radio_one_way)
         }
 
-        android.app.AlertDialog.Builder(ctx)
+        fun normalizeBearing(value: Float): Float {
+            var v = value % 360f
+            if (v < 0f) v += 360f
+            return v
+        }
+
+        val builder = android.app.AlertDialog.Builder(ctx)
             .setView(dialogView)
             .setPositiveButton("Save") { _, _ ->
                 val newDirectionality = when (radioGroup.checkedRadioButtonId) {
@@ -751,14 +749,69 @@ class DriveHudFragment : Fragment() {
                 val newType = com.roadwatch.data.HazardType.valueOf(spinner.selectedItem as String)
                 val updated = u.hazard.copy(directionality = newDirectionality, type = newType)
                 val originalKey = com.roadwatch.data.SeedOverrides.keyOf(u.hazard)
-                store.upsertByKey(originalKey, updated)
-                notifyRefresh()
+                if (store.upsertByKey(originalKey, updated)) {
+                    notifyRefresh()
+                    refreshMarkers()
+                    com.roadwatch.ui.UiAlerts.success(view, "Hazard updated")
+                } else {
+                    com.roadwatch.ui.UiAlerts.error(view, "Update failed")
+                }
             }
             .setNeutralButton("Move Pin") { _, _ ->
                 startMovePin(u)
             }
             .setNegativeButton("Cancel", null)
-            .show()
+
+        val dialog = builder.create()
+
+        if (com.roadwatch.app.BuildConfig.IS_ADMIN) {
+            quickLabel?.visibility = View.VISIBLE
+            btnMyLane?.visibility = View.VISIBLE
+            btnDelete?.visibility = View.VISIBLE
+
+            btnMyLane?.setOnClickListener {
+                val loc = com.roadwatch.core.location.DriveModeService.lastKnownLocation
+                if (loc == null || !loc.hasBearing()) {
+                    com.roadwatch.ui.UiAlerts.error(view, "Need a GPS heading to mark the lane")
+                    return@setOnClickListener
+                }
+                val heading = normalizeBearing(loc.bearing)
+                val updated = u.hazard.copy(
+                    directionality = "ONE_WAY",
+                    reportedHeadingDeg = heading,
+                    userBearing = heading,
+                )
+                val originalKey = com.roadwatch.data.SeedOverrides.keyOf(u.hazard)
+                if (store.upsertByKey(originalKey, updated)) {
+                    notifyRefresh()
+                    refreshMarkers()
+                    com.roadwatch.ui.UiAlerts.success(view, "Targeting this lane")
+                    dialog.dismiss()
+                } else {
+                    com.roadwatch.ui.UiAlerts.error(view, "Update failed")
+                }
+            }
+
+            btnDelete?.setOnClickListener {
+                android.app.AlertDialog.Builder(ctx)
+                    .setTitle("Delete hazard?")
+                    .setMessage("This removes the hazard for all drivers.")
+                    .setPositiveButton("Delete") { _, _ ->
+                        if (store.delete(u.id)) {
+                            notifyRefresh()
+                            refreshMarkers()
+                            com.roadwatch.ui.UiAlerts.success(view, "Hazard deleted")
+                            dialog.dismiss()
+                        } else {
+                            com.roadwatch.ui.UiAlerts.error(view, "Delete failed")
+                        }
+                    }
+                    .setNegativeButton("Cancel", null)
+                    .show()
+            }
+        }
+
+        dialog.show()
     }
 
     private var pendingMove: com.roadwatch.data.UserHazard? = null

@@ -22,6 +22,8 @@ object AppPrefs {
     private const val KEY_LAST_AUTOSTOP_LNG = "last_autostop_lng"
     private const val KEY_LAST_AUTOSTOP_AT = "last_autostop_at"
     private const val KEY_LAST_DND_PROMPT_AT = "last_dnd_prompt_at"
+    private const val KEY_LAST_HAZARD_DIRECTION = "last_hazard_direction"
+    private const val KEY_LAST_HAZARD_AT = "last_hazard_at"
 
     fun setMutedForMinutes(context: Context, minutes: Int) {
         val until = System.currentTimeMillis() + minutes * 60_000L
@@ -185,4 +187,20 @@ object AppPrefs {
     fun getLastDndPromptAt(context: Context): Long =
         context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
             .getLong(KEY_LAST_DND_PROMPT_AT, 0L)
+
+    fun setLastHazardDirection(context: Context, direction: String, whenMs: Long = System.currentTimeMillis()) {
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_LAST_HAZARD_DIRECTION, direction)
+            .putLong(KEY_LAST_HAZARD_AT, whenMs)
+            .apply()
+    }
+
+    fun getLastHazardDirection(context: Context): String? =
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .getString(KEY_LAST_HAZARD_DIRECTION, null)
+
+    fun getLastHazardDirectionAt(context: Context): Long =
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .getLong(KEY_LAST_HAZARD_AT, 0L)
 }

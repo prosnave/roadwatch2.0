@@ -102,6 +102,9 @@ class AlertManager(private val context: Context) {
                             if (f != null) speakDouble(text, f) else speakWithFocus(text)
                         }
                         sendOverlay(text)
+                        try {
+                            AppPrefs.setLastHazardDirection(context, first.first().h.directionality)
+                        } catch (_: Exception) {}
                         return
                     }
                 }
@@ -157,6 +160,9 @@ class AlertManager(private val context: Context) {
             if (f != null) speakDouble(text, f) else speakWithFocus(text)
         }
         sendOverlay(text)
+        try {
+            AppPrefs.setLastHazardDirection(context, target.directionality)
+        } catch (_: Exception) {}
     }
 
     private fun speakWithFocus(text: String) {

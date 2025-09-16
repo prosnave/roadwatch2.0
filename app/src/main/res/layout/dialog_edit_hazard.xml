@@ -1,19 +1,80 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="24dp">
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="24dp">
 
-    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Edit Hazard" android:textAppearance="?attr/textAppearanceHeadline6" />
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Edit Hazard"
+        android:textAppearance="?attr/textAppearanceHeadline6" />
 
-    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Hazard Type" android:layout_marginTop="16dp"/>
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:text="Hazard Type" />
 
-    <Spinner android:id="@+id/spinner_hazard_type" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+    <Spinner
+        android:id="@+id/spinner_hazard_type"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content" />
 
-    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Directionality" android:layout_marginTop="16dp"/>
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:text="Directionality" />
 
-    <RadioGroup android:id="@+id/radio_group_directionality" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp">
+    <RadioGroup
+        android:id="@+id/radio_group_directionality"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp">
 
-        <RadioButton android:id="@+id/radio_one_way" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="One-way" />
+        <RadioButton
+            android:id="@+id/radio_one_way"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="One-way" />
 
-        <RadioButton android:id="@+id/radio_two_way" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Two-way" />
+        <RadioButton
+            android:id="@+id/radio_two_way"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Two-way" />
     </RadioGroup>
+
+    <TextView
+        android:id="@+id/txt_quick_actions"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="24dp"
+        android:text="Quick actions"
+        android:textStyle="bold"
+        android:visibility="gone" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btn_quick_my_lane"
+        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:text="Mark for this lane"
+        android:textAllCaps="false"
+        android:visibility="gone" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btn_delete_hazard"
+        style="@style/Widget.MaterialComponents.Button.TextButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:text="Delete hazard"
+        android:textAllCaps="false"
+        android:textColor="@android:color/holo_red_dark"
+        android:visibility="gone" />
 
 </LinearLayout>
