@@ -173,6 +173,8 @@ object ApiClient {
             if (res.code in 200..299) Result.success(Unit) else Result.failure(IllegalStateException("HTTP ${res.code}: ${res.body}"))
         } catch (t: Throwable) { Result.failure(t) }
     }
+
+    fun registerDevice(baseUrl: String, appVersion: String): Result<Pair<String, String>> {
         return try {
             val url = baseUrl.trimEnd('/') + "/v1/devices/register"
             val payload = JSONObject()

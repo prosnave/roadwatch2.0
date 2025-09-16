@@ -603,8 +603,8 @@ class DriveHudFragment : Fragment() {
         val cautionBg = ContextCompat.getColor(ctx, R.color.primary_container)
         val cautionFg = ContextCompat.getColor(ctx, R.color.on_primary_container)
         val cautionStroke = ContextCompat.getColor(ctx, R.color.primary)
-        val warnBg = ContextCompat.getColor(ctx, R.color.error_container)
-        val warnFg = ContextCompat.getColor(ctx, R.color.on_error_container)
+        val warnBg = ContextCompat.getColor(ctx, R.color.alert_critical)
+        val warnFg = ContextCompat.getColor(ctx, R.color.on_surface)
 
         var bg = neutralBg
         var fg = neutralFg
@@ -1019,27 +1019,3 @@ class DriveHudFragment : Fragment() {
         } catch (_: Exception) {}
     }
 }
-
-</final_file_content>
-
-IMPORTANT: For any future changes to this file, use the final_file_content shown above as your reference. This content reflects the current state of the file, including any auto-formatting (e.g., if you used single quotes but the formatter converted them to double quotes). Always base your SEARCH/REPLACE operations on this final version to ensure accuracy.
-
-<environment_details>
-# VSCode Visible Files
-app/src.main/java/com/roadwatch/feature/drive/DriveHudFragment.kt
-
-# VSCode Open Tabs
-app/src/main/java/com/roadwatch/app/PermissionsFragment.kt
-app/src/main/java/com/roadwatch/feature/settings/SettingsFragment.kt
-app/src/main/java/com/roadwatch/alerts/AlertManager.kt
-app/src/main/java/com/roadwatch/feature/drive/DriveHudFragment.kt
-
-# Current Time
-16/09/2025, 10:32:01 am (Africa/Nairobi, UTC+3:00)
-
-# Context Window Usage
-178,845 / 1,048.576K tokens used (17%)
-
-# Current Mode
-ACT MODE
-</environment_details>
