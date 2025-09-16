@@ -8,11 +8,17 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 
 class PermissionsFragment : Fragment() {
     private lateinit var status: TextView
+
+    private val requestPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
+            requestNext()
+        }
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         return inflater.inflate(R.layout.fragment_permissions, container, false)
@@ -28,7 +34,7 @@ class PermissionsFragment : Fragment() {
         // Fine location first
         if (ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             status.text = "Requesting location permission..."
-            requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), REQ_FINE)
+            requestPermissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION))
             return
         }
         // Notifications (Android 13+)
@@ -36,7 +42,7 @@ class PermissionsFragment : Fragment() {
             val granted = ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
             if (!granted) {
                 status.text = "Requesting notification permission..."
-                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQ_NOTIF)
+                requestPermissionLauncher.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
                 return
             }
         }
@@ -45,7 +51,7 @@ class PermissionsFragment : Fragment() {
             val bgGranted = ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.ACCESS_BACKGROUND_LOCATION) == PackageManager.PERMISSION_GRANTED
             if (!bgGranted) {
                 status.text = "Requesting background location..."
-                requestPermissions(arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION), REQ_BG)
+                requestPermissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION))
                 return
             }
         }
@@ -54,16 +60,4 @@ class PermissionsFragment : Fragment() {
             .replace(R.id.fragment_container, com.roadwatch.feature.home.HomeFragment())
             .commitAllowingStateLoss()
     }
-
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        requestNext()
-    }
-
-    companion object {
-        private const val REQ_FINE = 3001
-        private const val REQ_NOTIF = 3002
-        private const val REQ_BG = 3003
-    }
 }
-

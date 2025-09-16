@@ -82,43 +82,61 @@ class DriverReportSheet : BottomSheetDialogFragment() {
             val baseUrl = com.roadwatch.prefs.AppPrefs.getBaseUrl(requireContext()).trim()
             val email = com.roadwatch.prefs.AppPrefs.getAccountEmail(requireContext())
             val password = com.roadwatch.prefs.AppPrefs.getAccountPassword(requireContext())
-            if (baseUrl.isEmpty() || email.isNullOrEmpty() || password.isNullOrEmpty()) {
-                com.roadwatch.ui.UiAlerts.error(view, "Set Base URL and account in Settings")
-                return
-            }
-            val payload = org.json.JSONObject().apply {
-                put("type", selected.name)
-                put("lat", loc.latitude)
-                put("lng", loc.longitude)
-                put("directionality", directionality)
-                put("reported_heading_deg", userBearing)
-            }
-            val result = com.roadwatch.network.ApiClient.createHazardWithBasic(baseUrl, email, password, payload)
-            if (result.isSuccess) {
-                com.roadwatch.ui.UiAlerts.success(view, "Reported ${selected.name}")
-                if (com.roadwatch.prefs.AppPrefs.isHapticsEnabled(requireContext())) {
-                    try { com.roadwatch.core.util.Haptics.tap(requireContext()) } catch (_: Exception) {}
+            if (baseUrl.isNotEmpty() && !email.isNullOrEmpty() && !password.isNullOrEmpty()) {
+                val payload = org.json.JSONObject().apply {
+                    put("type", selected.name)
+                    put("lat", loc.latitude)
+                    put("lng", loc.longitude)
+                    put("directionality", directionality)
+                    put("reported_heading_deg", userBearing)
                 }
-                try {
-                    val refreshIntent = android.content.Intent("com.roadwatch.REFRESH_HAZARDS")
-                    requireContext().sendBroadcast(refreshIntent)
-
-                    val details = "Type: ${selected.name}\n" +
-                            "Location: (${loc.latitude}, ${loc.longitude})\n" +
-                            "User Bearing: $userBearing\n" +
-                            "Directionality: $directionality"
-                    val reportIntent = android.content.Intent("com.roadwatch.HAZARD_REPORTED").apply {
-                        putExtra("hazard_details", details)
+                val result = com.roadwatch.network.ApiClient.createHazardWithBasic(baseUrl, email, password, payload)
+                if (result.isSuccess) {
+                    com.roadwatch.ui.UiAlerts.success(view, "Reported ${selected.name}")
+                    if (com.roadwatch.prefs.AppPrefs.isHapticsEnabled(requireContext())) {
+                        try { com.roadwatch.core.util.Haptics.tap(requireContext()) } catch (_: Exception) {}
                     }
-                    requireContext().sendBroadcast(reportIntent)
-                } catch (_: Exception) {}
-                dismissAllowingStateLoss()
+                    try {
+                        val refreshIntent = android.content.Intent("com.roadwatch.REFRESH_HAZARDS")
+                        requireContext().sendBroadcast(refreshIntent)
+
+                        val details = "Type: ${selected.name}\n" +
+                                "Location: (${loc.latitude}, ${loc.longitude})\n" +
+                                "User Bearing: $userBearing\n" +
+                                "Directionality: $directionality"
+                        val reportIntent = android.content.Intent("com.roadwatch.HAZARD_REPORTED").apply {
+                            putExtra("hazard_details", details)
+                        }
+                        requireContext().sendBroadcast(reportIntent)
+                    } catch (_: Exception) {}
+                    dismissAllowingStateLoss()
+                } else {
+                    val msg = result.exceptionOrNull()?.message ?: "error"
+                    if (msg.contains("409")) com.roadwatch.ui.UiAlerts.warn(view, "Similar ${selected.name.lowercase().replace('_',' ')} nearby")
+                    else com.roadwatch.ui.UiAlerts.error(view, "Report failed: $msg")
+                }
             } else {
-                val msg = result.exceptionOrNull()?.message ?: "error"
-                if (msg.contains("409")) com.roadwatch.ui.UiAlerts.warn(view, "Similar ${selected.name.lowercase().replace('_',' ')} nearby")
-                else com.roadwatch.ui.UiAlerts.error(view, "Report failed: $msg")
+                val repo = SeedRepository(requireContext())
+                val hazard = Hazard(
+                    type = selected,
+                    lat = loc.latitude,
+                    lng = loc.longitude,
+                    reportedHeadingDeg = userBearing,
+                    directionality = directionality,
+                    userBearing = userBearing,
+                    active = true,
+                    source = "USER",
+                    createdAt = Instant.now()
+                )
+                val result = repo.addUserHazardWithDedup(hazard)
+                when (result) {
+                    SeedRepository.AddResult.ADDED -> {
+                        handleHazardAdded(view, hazard, "Reported ${selected.name}", allowDirectionConfirm = true)
+                    }
+                    SeedRepository.AddResult.DUPLICATE_NEARBY -> com.roadwatch.ui.UiAlerts.warn(view, "Similar ${selected.name.lowercase().replace('_',' ')} nearby")
+                    else -> com.roadwatch.ui.UiAlerts.error(view, "Report failed")
+                }
             }
-            // Only dismiss on success; keep sheet open for errors/duplicates so user can adjust
         }
 
         // Non-zone flow: just submit with the hazard type passed when opening the sheet
@@ -218,44 +236,151 @@ class DriverReportSheet : BottomSheetDialogFragment() {
             val baseUrl = com.roadwatch.prefs.AppPrefs.getBaseUrl(requireContext()).trim()
             val email = com.roadwatch.prefs.AppPrefs.getAccountEmail(requireContext())
             val password = com.roadwatch.prefs.AppPrefs.getAccountPassword(requireContext())
-            if (baseUrl.isEmpty() || email.isNullOrEmpty() || password.isNullOrEmpty()) {
-                com.roadwatch.ui.UiAlerts.error(view, "Set Base URL and account in Settings")
-                return@setOnClickListener
-            }
-            val payload = org.json.JSONObject().apply {
-                put("type", HazardType.SPEED_LIMIT_ZONE.name)
-                put("lat", loc.latitude)
-                put("lng", loc.longitude)
-                put("directionality", directionality)
-                put("reported_heading_deg", userBearing)
-                put("speed_limit_kph", kph)
-                put("zone_start_lat", zoneStart?.latitude)
-                put("zone_start_lng", zoneStart?.longitude)
-                put("zone_end_lat", zoneEnd?.latitude)
-                put("zone_end_lng", zoneEnd?.longitude)
-            }
-            val result = com.roadwatch.network.ApiClient.createHazardWithBasic(baseUrl, email, password, payload)
-            if (result.isSuccess) {
-                com.roadwatch.ui.UiAlerts.success(view, "Zone reported")
-                try {
-                    val refreshIntent = android.content.Intent("com.roadwatch.REFRESH_HAZARDS")
-                    requireContext().sendBroadcast(refreshIntent)
+            if (baseUrl.isNotEmpty() && !email.isNullOrEmpty() && !password.isNullOrEmpty()) {
+                val payload = org.json.JSONObject().apply {
+                    put("type", HazardType.SPEED_LIMIT_ZONE.name)
+                    put("lat", loc.latitude)
+                    put("lng", loc.longitude)
+                    put("directionality", directionality)
+                    put("reported_heading_deg", userBearing)
+                    put("speed_limit_kph", kph)
+                    put("zone_start_lat", zoneStart?.latitude)
+                    put("zone_start_lng", zoneStart?.longitude)
+                    put("zone_end_lat", zoneEnd?.latitude)
+                    put("zone_end_lng", zoneEnd?.longitude)
+                }
+                val result = com.roadwatch.network.ApiClient.createHazardWithBasic(baseUrl, email, password, payload)
+                if (result.isSuccess) {
+                    com.roadwatch.ui.UiAlerts.success(view, "Zone reported")
+                    try {
+                        val refreshIntent = android.content.Intent("com.roadwatch.REFRESH_HAZARDS")
+                        requireContext().sendBroadcast(refreshIntent)
 
-                    val details = "Type: SPEED_LIMIT_ZONE\n" +
-                            "Location: (${loc.latitude}, ${loc.longitude})\n" +
-                            "User Bearing: ${userBearing}\n" +
-                            "Directionality: ${directionality}"
-                    val reportIntent = android.content.Intent("com.roadwatch.HAZARD_REPORTED").apply {
-                        putExtra("hazard_details", details)
-                    }
-                    requireContext().sendBroadcast(reportIntent)
-                } catch (_: Exception) {}
-                dismissAllowingStateLoss()
+                        val details = "Type: SPEED_LIMIT_ZONE\n" +
+                                "Location: (${loc.latitude}, ${loc.longitude})\n" +
+                                "User Bearing: ${userBearing}\n" +
+                                "Directionality: ${directionality}"
+                        val reportIntent = android.content.Intent("com.roadwatch.HAZARD_REPORTED").apply {
+                            putExtra("hazard_details", details)
+                        }
+                        requireContext().sendBroadcast(reportIntent)
+                    } catch (_: Exception) {}
+                    dismissAllowingStateLoss()
+                } else {
+                    val msg = result.exceptionOrNull()?.message ?: "error"
+                    if (msg.contains("409")) com.roadwatch.ui.UiAlerts.warn(view, "Similar zone nearby")
+                    else com.roadwatch.ui.UiAlerts.error(view, "Report failed: $msg")
+                }
             } else {
-                val msg = result.exceptionOrNull()?.message ?: "error"
-                if (msg.contains("409")) com.roadwatch.ui.UiAlerts.warn(view, "Similar zone nearby")
-                else com.roadwatch.ui.UiAlerts.error(view, "Report failed: $msg")
+                val repo = SeedRepository(requireContext())
+                val h = Hazard(
+                    type = HazardType.SPEED_LIMIT_ZONE,
+                    lat = loc.latitude,
+                    lng = loc.longitude,
+                    reportedHeadingDeg = userBearing,
+                    directionality = directionality,
+                    userBearing = userBearing,
+                    active = true,
+                    source = "USER",
+                    createdAt = Instant.now(),
+                    speedLimitKph = kph,
+                    zoneLengthMeters = len,
+                    zoneStartLat = zoneStart?.latitude,
+                    zoneStartLng = zoneStart?.longitude,
+                    zoneEndLat = zoneEnd?.latitude,
+                    zoneEndLng = zoneEnd?.longitude,
+                )
+                when (repo.addUserHazardWithDedup(h)) {
+                    SeedRepository.AddResult.ADDED -> {
+                        handleHazardAdded(view, h, "Zone reported", allowDirectionConfirm = false)
+                    }
+                    SeedRepository.AddResult.DUPLICATE_NEARBY -> com.roadwatch.ui.UiAlerts.warn(view, "Similar zone nearby")
+                    else -> com.roadwatch.ui.UiAlerts.error(view, "Report failed")
+                }
             }
+        }
+    }
+
+    private fun handleHazardAdded(view: View, hazard: Hazard, successMessage: String, allowDirectionConfirm: Boolean) {
+        val proceed: (Hazard) -> Unit = { finalHazard -> finalizeHazardReport(view, finalHazard, successMessage) }
+        if (allowDirectionConfirm) {
+            maybeConfirmDirection(view, hazard, proceed)
+        } else {
+            proceed(hazard)
+        }
+    }
+
+    private fun maybeConfirmDirection(view: View, hazard: Hazard, complete: (Hazard) -> Unit) {
+        val ctx = requireContext()
+        val lastDirection = com.roadwatch.prefs.AppPrefs.getLastHazardDirection(ctx)
+        if (lastDirection == null || hazard.directionality.equals(lastDirection, ignoreCase = true)) {
+            complete(hazard)
+            return
+        }
+
+        val choices = listOf(
+            "One-way" to "ONE_WAY",
+            "Two-way" to "BIDIRECTIONAL"
+        )
+        val labels = choices.map { it.first }.toTypedArray()
+        val idxDefault = choices.indexOfFirst { it.second.equals(hazard.directionality, true) }.let { if (it >= 0) it else 0 }
+        var selectedIndex = idxDefault
+        val message = "Previous hazard was ${niceDirectionLabel(lastDirection)}. Confirm road type for this hazard."
+
+        android.app.AlertDialog.Builder(ctx)
+            .setTitle("Confirm road type")
+            .setMessage(message)
+            .setSingleChoiceItems(labels, idxDefault) { _, which -> selectedIndex = which }
+            .setPositiveButton("Save") { _, _ ->
+                val chosen = choices.getOrNull(selectedIndex)?.second ?: hazard.directionality
+                if (!chosen.equals(hazard.directionality, true)) {
+                    val updated = hazard.copy(directionality = chosen)
+                    val store = com.roadwatch.data.HazardStore(ctx)
+                    val key = com.roadwatch.data.SeedOverrides.keyOf(hazard)
+                    if (store.upsertByKey(key, updated)) {
+                        complete(updated)
+                    } else {
+                        com.roadwatch.ui.UiAlerts.error(view, "Couldn't update road type")
+                        complete(hazard)
+                    }
+                } else {
+                    complete(hazard)
+                }
+            }
+            .setNegativeButton("Keep") { _, _ -> complete(hazard) }
+            .setOnCancelListener { complete(hazard) }
+            .show()
+    }
+
+    private fun finalizeHazardReport(view: View, hazard: Hazard, successMessage: String) {
+        com.roadwatch.ui.UiAlerts.success(view, successMessage)
+        if (com.roadwatch.prefs.AppPrefs.isHapticsEnabled(requireContext())) {
+            try { com.roadwatch.core.util.Haptics.tap(requireContext()) } catch (_: Exception) {}
+        }
+        try {
+            val refreshIntent = android.content.Intent("com.roadwatch.REFRESH_HAZARDS")
+            requireContext().sendBroadcast(refreshIntent)
+
+            val details = "Type: ${hazard.type.name}\n" +
+                    "Location: (${hazard.lat}, ${hazard.lng})\n" +
+                    "User Bearing: ${hazard.userBearing}\n" +
+                    "Directionality: ${hazard.directionality}"
+            val reportIntent = android.content.Intent("com.roadwatch.HAZARD_REPORTED").apply {
+                putExtra("hazard_details", details)
+            }
+            requireContext().sendBroadcast(reportIntent)
+        } catch (_: Exception) {}
+
+        try { com.roadwatch.prefs.AppPrefs.setLastHazardDirection(requireContext(), hazard.directionality) } catch (_: Exception) {}
+        dismissAllowingStateLoss()
+    }
+
+    private fun niceDirectionLabel(direction: String?): String {
+        return when (direction?.uppercase()) {
+            "ONE_WAY" -> "One-way"
+            "BIDIRECTIONAL" -> "Two-way"
+            "OPPOSITE" -> "Opposite lane"
+            else -> "Unknown"
         }
     }
 

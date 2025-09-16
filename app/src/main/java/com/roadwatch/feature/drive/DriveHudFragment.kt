@@ -39,6 +39,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.activity.result.contract.ActivityResultContracts
 
 class DriveHudFragment : Fragment() {
     private val ioScope = CoroutineScope(Dispatchers.IO)
@@ -55,6 +56,29 @@ class DriveHudFragment : Fragment() {
     private var providersReceiver: BroadcastReceiver? = null
     private var overlayReceiver: BroadcastReceiver? = null
     private var uiStateReceiver: BroadcastReceiver? = null
+
+    private val requestPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
+            permissions.entries.forEach {
+                val permission = it.key
+                val isGranted = it.value
+                if (permission == Manifest.permission.ACCESS_FINE_LOCATION) {
+                    if (isGranted) {
+                        enableMyLocation()
+                    } else {
+                        Toast.makeText(requireContext(), "Location permission required", Toast.LENGTH_SHORT).show()
+                        parentFragmentManager.popBackStack()
+                    }
+                }
+                if (permission == Manifest.permission.POST_NOTIFICATIONS) {
+                    if (!isGranted) {
+                        Toast.makeText(requireContext(), "Notifications are required for alerts", Toast.LENGTH_SHORT).show()
+                        parentFragmentManager.popBackStack()
+                    }
+                }
+            }
+        }
+
     private val locListener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
             googleMap?.isMyLocationEnabled = hasFinePermission()
@@ -87,12 +111,12 @@ class DriveHudFragment : Fragment() {
         ensurePrerequisitesOrExit()
 
         // Setup map
-        val tag = "drive_map"
-        var mapFragment = childFragmentManager.findFragmentByTag(tag) as? SupportMapFragment
+        val mapTag = "drive_map"
+        var mapFragment = childFragmentManager.findFragmentByTag(mapTag) as? SupportMapFragment
         if (mapFragment == null) {
             mapFragment = SupportMapFragment.newInstance()
             childFragmentManager.beginTransaction()
-                .replace(R.id.map_container, mapFragment, tag)
+                .replace(R.id.map_container, mapFragment, mapTag)
                 .commitNow()
         }
         mapFragment.getMapAsync { gMap ->
@@ -125,9 +149,9 @@ class DriveHudFragment : Fragment() {
 
             // Open editor when a hazard marker is tapped
             gMap.setOnMarkerClickListener { marker ->
-                val tag = marker.tag
-                if (tag is com.roadwatch.data.Hazard) {
-                    openHazardEditor(tag)
+                val markerTag = marker.tag
+                if (markerTag is com.roadwatch.data.Hazard) {
+                    openHazardEditor(markerTag)
                     true
                 } else {
                     false
@@ -182,13 +206,16 @@ class DriveHudFragment : Fragment() {
             lastMoveTime = now
         }
 
+        // Default the speed card to neutral styling until the first hazard evaluation runs.
+        updateSpeedCardStyle(null)
+
         // Prompt for DND bypass so alerts can play in Silent/DND
         ensureDndAccessPrompt()
     }
 
     private fun enableMyLocation() {
         if (!hasFinePermission()) {
-            requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), REQ_LOC_FINE)
+            requestPermissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION))
             return
         }
         googleMap?.isMyLocationEnabled = true
@@ -209,27 +236,6 @@ class DriveHudFragment : Fragment() {
 
     private fun stopLocationUpdates() {
         try { lm?.removeUpdates(locListener) } catch (_: Exception) {}
-    }
-
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == REQ_LOC_FINE) {
-            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                enableMyLocation()
-            }
-            else {
-                // Without location we exit Drive Mode
-                Toast.makeText(requireContext(), "Location permission required", Toast.LENGTH_SHORT).show()
-                parentFragmentManager.popBackStack()
-            }
-        }
-        if (requestCode == REQ_NOTIF && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-            val granted = grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
-            if (!granted) {
-                Toast.makeText(requireContext(), "Notifications are required for alerts", Toast.LENGTH_SHORT).show()
-                parentFragmentManager.popBackStack()
-            }
-        }
     }
 
     override fun onDestroyView() {
@@ -269,21 +275,16 @@ class DriveHudFragment : Fragment() {
                 override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
                     when (intent?.action) {
                         "com.roadwatch.ALERT_OVERLAY" -> {
-                            val text = intent.getStringExtra("text") ?: return
-                            showAlertOverlay(text)
+                            // Audio cues already inform the driver; suppress duplicate popup UI.
+                            view?.findViewById<com.google.android.material.card.MaterialCardView>(R.id.alert_overlay)?.visibility = View.GONE
                         }
                         "com.roadwatch.REFRESH_HAZARDS" -> refreshMarkers()
-                        "com.roadwatch.HAZARD_REPORTED" -> {
-                            val hazardDetails = intent.getStringExtra("hazard_details") ?: return
-                            showHazardReportedPopup(hazardDetails)
-                        }
                     }
                 }
             }
             val filter = IntentFilter().apply {
                 addAction("com.roadwatch.ALERT_OVERLAY")
                 addAction("com.roadwatch.REFRESH_HAZARDS")
-                addAction("com.roadwatch.HAZARD_REPORTED")
             }
             requireContext().registerReceiver(overlayReceiver, filter)
         }
@@ -315,8 +316,6 @@ class DriveHudFragment : Fragment() {
     }
 
     companion object {
-        private const val REQ_LOC_FINE = 2001
-        private const val REQ_NOTIF = 2002
         private const val MIN_HEADING_AGREE_DEG = 15.0
         private const val ONE_WAY_MAX_HEADING_DEG = 10.0
         private const val MAX_LATERAL_OFFSET_METERS = 7.0
@@ -348,7 +347,7 @@ class DriveHudFragment : Fragment() {
         var best: android.location.Location? = null
         for (p in providers) {
             val l = lm.getLastKnownLocation(p) ?: continue
-            if (best == null || l.accuracy < best!!.accuracy) best = l
+            if (best == null || l.accuracy < best.accuracy) best = l
         }
         return best
     }
@@ -424,27 +423,6 @@ class DriveHudFragment : Fragment() {
         parentFragmentManager.popBackStack()
     }
 
-    private fun showHazardReportedPopup(hazardDetails: String) {
-        android.app.AlertDialog.Builder(requireContext())
-            .setTitle("Hazard Reported")
-            .setMessage(hazardDetails)
-            .setPositiveButton("OK", null)
-            .show()
-    }
-
-    private fun showAlertOverlay(text: String) {
-        val card = view?.findViewById<com.google.android.material.card.MaterialCardView>(R.id.alert_overlay) ?: return
-        val tv = view?.findViewById<android.widget.TextView>(R.id.alert_text) ?: return
-        tv.text = text
-        card.alpha = 0f
-        card.visibility = View.VISIBLE
-        card.animate().alpha(1f).setDuration(150).withEndAction {
-            card.postDelayed({
-                try { card.animate().alpha(0f).setDuration(200).withEndAction { card.visibility = View.GONE }.start() } catch (_: Exception) {}
-            }, 3500L)
-        }.start()
-    }
-
     // --- Prerequisites: notifications allowed, location permission, location services on ---
     private fun ensurePrerequisitesOrExit() {
         // Ringer mode check
@@ -457,7 +435,7 @@ class DriveHudFragment : Fragment() {
         if (!NotificationManagerCompat.from(requireContext()).areNotificationsEnabled()) {
             // On Android 13+, request POST_NOTIFICATIONS; otherwise guide to settings
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQ_NOTIF)
+                requestPermissionLauncher.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
             } else {
                 android.app.AlertDialog.Builder(requireContext())
                     .setTitle("Enable notifications")
@@ -489,13 +467,12 @@ class DriveHudFragment : Fragment() {
         // Gate the prompt: only if notifications are disabled or alerts channel has low importance and we haven't prompted recently
         val ctx = requireContext()
         val nm = ctx.getSystemService(android.content.Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
-        var needsPrompt = false
         val channelsOk = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
             val ch = nm.getNotificationChannel(com.roadwatch.notifications.NotificationHelper.CHANNEL_ALERTS)
             ch != null && ch.importance >= android.app.NotificationManager.IMPORTANCE_HIGH
         } else true
         val enabled = androidx.core.app.NotificationManagerCompat.from(ctx).areNotificationsEnabled()
-        needsPrompt = !(enabled && channelsOk)
+        val needsPrompt = !(enabled && channelsOk)
 
         // Throttle: no more than once per 24h
         val last = com.roadwatch.prefs.AppPrefs.getLastDndPromptAt(ctx)
@@ -572,6 +549,7 @@ class DriveHudFragment : Fragment() {
         if (!location.hasBearing() || location.speed < 1.0f) {
             chip.visibility = View.GONE
             subtitle?.text = ""
+            updateSpeedCardStyle(null)
             return
         }
 
@@ -608,10 +586,68 @@ class DriveHudFragment : Fragment() {
             chipText.text = text
             chip.visibility = View.VISIBLE
             subtitle?.text = "Next: ${type} • ${formatNiceDistance(bestDist)}"
+            updateSpeedCardStyle(bestAlong)
         } else {
             chip.visibility = View.GONE
             subtitle?.text = ""
+            updateSpeedCardStyle(null)
         }
+    }
+
+    private fun updateSpeedCardStyle(nextAlongMeters: Double?) {
+        val card = view?.findViewById<com.google.android.material.card.MaterialCardView>(R.id.speed_card) ?: return
+        val ctx = card.context
+        val neutralBg = ContextCompat.getColor(ctx, R.color.surface)
+        val neutralFg = ContextCompat.getColor(ctx, R.color.on_surface)
+        val neutralStroke = ContextCompat.getColor(ctx, R.color.outline)
+        val cautionBg = ContextCompat.getColor(ctx, R.color.primary_container)
+        val cautionFg = ContextCompat.getColor(ctx, R.color.on_primary_container)
+        val cautionStroke = ContextCompat.getColor(ctx, R.color.primary)
+        val warnBg = ContextCompat.getColor(ctx, R.color.error_container)
+        val warnFg = ContextCompat.getColor(ctx, R.color.on_error_container)
+
+        var bg = neutralBg
+        var fg = neutralFg
+        var stroke = neutralStroke
+        var subtitleColor = ContextCompat.getColor(ctx, R.color.on_surface_variant)
+
+        if (nextAlongMeters != null) {
+            when {
+                nextAlongMeters <= 75.0 -> {
+                    bg = warnBg
+                    fg = warnFg
+                    stroke = warnBg
+                    subtitleColor = warnFg
+                }
+                nextAlongMeters <= 200.0 -> {
+                    bg = cautionBg
+                    fg = cautionFg
+                    stroke = cautionStroke
+                    subtitleColor = cautionFg
+                }
+                else -> {
+                    bg = neutralBg
+                    fg = neutralFg
+                    stroke = neutralStroke
+                    subtitleColor = ContextCompat.getColor(ctx, R.color.on_surface_variant)
+                }
+            }
+        }
+
+        card.setCardBackgroundColor(bg)
+        card.strokeWidth = if (stroke == neutralStroke) 0 else dp(2)
+        card.setStrokeColor(stroke)
+
+        val subtitle = view?.findViewById<android.widget.TextView>(R.id.txt_next_subtitle)
+        subtitle?.setTextColor(subtitleColor)
+
+        val labels = listOfNotNull(
+            txtSpeed,
+            txtBearing,
+            view?.findViewById<android.widget.TextView>(R.id.txt_speed_label),
+            view?.findViewById<android.widget.TextView>(R.id.txt_direction_label)
+        )
+        labels.forEach { it.setTextColor(fg) }
     }
 
     private fun targetPoint(h: com.roadwatch.data.Hazard): Pair<Double, Double> {
@@ -838,8 +874,13 @@ class DriveHudFragment : Fragment() {
         val dialogView = layoutInflater.inflate(com.roadwatch.app.R.layout.dialog_edit_hazard, null)
         val radioGroup = dialogView.findViewById<android.widget.RadioGroup>(com.roadwatch.app.R.id.radio_group_directionality)
         val spinner = dialogView.findViewById<android.widget.Spinner>(com.roadwatch.app.R.id.spinner_hazard_type)
+        val quickLabel = dialogView.findViewById<android.widget.TextView>(com.roadwatch.app.R.id.txt_quick_actions)
+        val btnOppositeLane = dialogView.findViewById<com.google.android.material.button.MaterialButton>(com.roadwatch.app.R.id.btn_quick_opposite_lane)
+        val btnDelete = dialogView.findViewById<com.google.android.material.button.MaterialButton>(com.roadwatch.app.R.id.btn_delete_hazard)
 
-        val hazardTypes = com.roadwatch.data.HazardType.values().filter { it != com.roadwatch.data.HazardType.SPEED_LIMIT_ZONE }.map { it.name }
+        val hazardTypes = com.roadwatch.data.HazardType.values()
+            .filter { it != com.roadwatch.data.HazardType.SPEED_LIMIT_ZONE }
+            .map { it.name }
         val adapter = android.widget.ArrayAdapter(ctx, android.R.layout.simple_spinner_dropdown_item, hazardTypes)
         spinner.adapter = adapter
 
@@ -850,7 +891,13 @@ class DriveHudFragment : Fragment() {
             else -> radioGroup.check(com.roadwatch.app.R.id.radio_one_way)
         }
 
-        android.app.AlertDialog.Builder(ctx)
+        fun normalizeBearing(value: Float): Float {
+            var v = value % 360f
+            if (v < 0f) v += 360f
+            return v
+        }
+
+        val builder = android.app.AlertDialog.Builder(ctx)
             .setView(dialogView)
             .setPositiveButton("Save") { _, _ ->
                 val newDirectionality = when (radioGroup.checkedRadioButtonId) {
@@ -861,14 +908,69 @@ class DriveHudFragment : Fragment() {
                 val newType = com.roadwatch.data.HazardType.valueOf(spinner.selectedItem as String)
                 val updated = u.hazard.copy(directionality = newDirectionality, type = newType)
                 val originalKey = com.roadwatch.data.SeedOverrides.keyOf(u.hazard)
-                store.upsertByKey(originalKey, updated)
-                notifyRefresh()
+                if (store.upsertByKey(originalKey, updated)) {
+                    notifyRefresh()
+                    refreshMarkers()
+                    com.roadwatch.ui.UiAlerts.success(view, "Hazard updated")
+                } else {
+                    com.roadwatch.ui.UiAlerts.error(view, "Update failed")
+                }
             }
             .setNeutralButton("Move Pin") { _, _ ->
                 startMovePin(u)
             }
             .setNegativeButton("Cancel", null)
-            .show()
+
+        val dialog = builder.create()
+
+        if (com.roadwatch.app.BuildConfig.IS_ADMIN) {
+            quickLabel?.visibility = View.VISIBLE
+            btnOppositeLane?.visibility = View.VISIBLE
+            btnDelete?.visibility = View.VISIBLE
+
+            btnOppositeLane?.setOnClickListener {
+                val loc = com.roadwatch.core.location.DriveModeService.lastKnownLocation
+                val baseHeading = when {
+                    loc != null && loc.hasBearing() -> loc.bearing
+                    else -> u.hazard.reportedHeadingDeg
+                }
+                val opposite = normalizeBearing(baseHeading + 180f)
+                val updated = u.hazard.copy(
+                    directionality = "OPPOSITE",
+                    reportedHeadingDeg = opposite,
+                    userBearing = opposite,
+                )
+                val originalKey = com.roadwatch.data.SeedOverrides.keyOf(u.hazard)
+                if (store.upsertByKey(originalKey, updated)) {
+                    notifyRefresh()
+                    refreshMarkers()
+                    com.roadwatch.ui.UiAlerts.success(view, "Marked for opposite lane")
+                    dialog.dismiss()
+                } else {
+                    com.roadwatch.ui.UiAlerts.error(view, "Update failed")
+                }
+            }
+
+            btnDelete?.setOnClickListener {
+                android.app.AlertDialog.Builder(ctx)
+                    .setTitle("Delete hazard?")
+                    .setMessage("This removes the hazard for all drivers.")
+                    .setPositiveButton("Delete") { _, _ ->
+                        if (store.delete(u.id)) {
+                            notifyRefresh()
+                            refreshMarkers()
+                            com.roadwatch.ui.UiAlerts.success(view, "Hazard deleted")
+                            dialog.dismiss()
+                        } else {
+                            com.roadwatch.ui.UiAlerts.error(view, "Delete failed")
+                        }
+                    }
+                    .setNegativeButton("Cancel", null)
+                    .show()
+            }
+        }
+
+        dialog.show()
     }
 
     private var pendingMove: com.roadwatch.data.UserHazard? = null
@@ -917,3 +1019,27 @@ class DriveHudFragment : Fragment() {
         } catch (_: Exception) {}
     }
 }
+
+</final_file_content>
+
+IMPORTANT: For any future changes to this file, use the final_file_content shown above as your reference. This content reflects the current state of the file, including any auto-formatting (e.g., if you used single quotes but the formatter converted them to double quotes). Always base your SEARCH/REPLACE operations on this final version to ensure accuracy.
+
+<environment_details>
+# VSCode Visible Files
+app/src.main/java/com/roadwatch/feature/drive/DriveHudFragment.kt
+
+# VSCode Open Tabs
+app/src/main/java/com/roadwatch/app/PermissionsFragment.kt
+app/src/main/java/com/roadwatch/feature/settings/SettingsFragment.kt
+app/src/main/java/com/roadwatch/alerts/AlertManager.kt
+app/src/main/java/com/roadwatch/feature/drive/DriveHudFragment.kt
+
+# Current Time
+16/09/2025, 10:32:01 am (Africa/Nairobi, UTC+3:00)
+
+# Context Window Usage
+178,845 / 1,048.576K tokens used (17%)
+
+# Current Mode
+ACT MODE
+</environment_details>

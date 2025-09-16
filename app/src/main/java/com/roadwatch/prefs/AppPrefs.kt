@@ -32,10 +32,8 @@ object AppPrefs {
     private const val KEY_LAST_LNG = "last_lng"
     private const val KEY_ACCOUNT_EMAIL = "account_email"
     private const val KEY_ACCOUNT_PASSWORD = "account_password"
-    private const val KEY_BASE_URL = "base_url"
-    private const val KEY_DEVICE_TOKEN = "device_token"
-    private const val KEY_SYNC_RADIUS_M = "sync_radius_m"
-    private const val KEY_LAST_SINCE = "last_since"
+    private const val KEY_LAST_HAZARD_DIRECTION = "last_hazard_direction"
+    private const val KEY_LAST_HAZARD_AT = "last_hazard_at"
 
     fun setMutedForMinutes(context: Context, minutes: Int) {
         val until = System.currentTimeMillis() + minutes * 60_000L
@@ -268,4 +266,20 @@ object AppPrefs {
         context.getSharedPreferences(FILE, Context.MODE_PRIVATE).getString(KEY_ACCOUNT_EMAIL, null)
     fun getAccountPassword(context: Context): String? =
         context.getSharedPreferences(FILE, Context.MODE_PRIVATE).getString(KEY_ACCOUNT_PASSWORD, null)
+
+    fun setLastHazardDirection(context: Context, direction: String, whenMs: Long = System.currentTimeMillis()) {
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_LAST_HAZARD_DIRECTION, direction)
+            .putLong(KEY_LAST_HAZARD_AT, whenMs)
+            .apply()
+    }
+
+    fun getLastHazardDirection(context: Context): String? =
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .getString(KEY_LAST_HAZARD_DIRECTION, null)
+
+    fun getLastHazardDirectionAt(context: Context): Long =
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .getLong(KEY_LAST_HAZARD_AT, 0L)
 }

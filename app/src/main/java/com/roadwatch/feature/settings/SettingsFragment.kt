@@ -28,6 +28,21 @@ class SettingsFragment : Fragment() {
     private var tts: TextToSpeech? = null
     private var ttsReady: Boolean = false
 
+    private var pendingPermissionCallback: ((Boolean) -> Unit)? = null
+    private var pendingBgCallback: ((Boolean) -> Unit)? = null
+
+    private val requestPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
+            pendingPermissionCallback?.invoke(isGranted)
+            pendingPermissionCallback = null
+        }
+
+    private val requestBgPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
+            pendingBgCallback?.invoke(isGranted)
+            pendingBgCallback = null
+        }
+
     // File picker for CSV imports
     private val importCsvLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) {
@@ -208,13 +223,9 @@ class SettingsFragment : Fragment() {
                 .setPositiveButton("Continue") { _, _ ->
                     ioScope.launch {
                         val repo = SeedRepository(requireContext())
-                        val (result, _) = repo.loadSeeds()
+                        repo.loadSeeds()
                         requireActivity().runOnUiThread {
-                            status.text = if (result.loaded) {
-                                "Seeds reloaded: ${result.count}"
-                            } else {
-                                "Seed reload failed"
-                            }
+                            status.text = "Seeds reloaded"
                             refreshDataButtons()
                         }
                     }
@@ -450,39 +461,17 @@ class SettingsFragment : Fragment() {
         if (granted) {
             callback(true)
         } else {
-            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQ_NOTIF)
-            // Defer callback; we'll call it from onRequestPermissionsResult
             pendingPermissionCallback = callback
+            requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
-    }
-
-    private var pendingPermissionCallback: ((Boolean) -> Unit)? = null
-
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == REQ_NOTIF) {
-            val granted = grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
-            pendingPermissionCallback?.invoke(granted)
-            pendingPermissionCallback = null
-        }
-        if (requestCode == REQ_BG) {
-            val granted = grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
-            pendingBgCallback?.invoke(granted)
-            pendingBgCallback = null
-        }
-    }
-
-    companion object {
-        private const val REQ_NOTIF = 1002
-        private const val REQ_BG = 1004
     }
 
     private fun ensureBackgroundLocationPermission(callback: (Boolean) -> Unit) {
         val ctx = requireContext()
         val fgGranted = ctx.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
         if (!fgGranted) {
-            requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), REQ_BG)
             pendingBgCallback = callback
+            requestBgPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
             return
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -493,14 +482,13 @@ class SettingsFragment : Fragment() {
                 startActivity(android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.fromParts("package", ctx.packageName, null)))
                 pendingBgCallback = callback
             } else {
-                requestPermissions(arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION), REQ_BG)
                 pendingBgCallback = callback
+                requestBgPermissionLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
             }
         } else {
             callback(true)
         }
     }
-    private var pendingBgCallback: ((Boolean) -> Unit)? = null
 
     // Serialize current preferences into a JSON object for account sync
     private fun collectSettings(): org.json.JSONObject {
