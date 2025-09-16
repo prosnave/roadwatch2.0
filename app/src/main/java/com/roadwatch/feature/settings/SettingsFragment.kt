@@ -278,20 +278,67 @@ class SettingsFragment : Fragment() {
                 val exportDir = File(requireContext().filesDir, "exports").apply { mkdirs() }
                 val out = File(exportDir, "hazards_export.csv")
                 out.bufferedWriter().use { w ->
-                    w.appendLine("type,lat,lng,source,active,votes,directionality,createdAt,speedLimitKph,zoneLengthMeters,zoneStartLat,zoneStartLng,zoneEndLat,zoneEndLng")
-                    // Seeds with active based on overrides
-                    seeds.forEach { h ->
-                        val key = com.roadwatch.data.SeedOverrides.keyOf(h)
-                        val active = h.active && !com.roadwatch.data.SeedOverrides.isDisabled(requireContext(), key)
+                    val header = listOf(
+                        "type",
+                        "lat",
+                        "lng",
+                        "source",
+                        "active",
+                        "directionality",
+                        "reportedHeadingDeg",
+                        "userBearing",
+                        "createdAt",
+                        "updatedAt",
+                        "speedLimitKph",
+                        "zoneLengthMeters",
+                        "zoneStartLat",
+                        "zoneStartLng",
+                        "zoneEndLat",
+                        "zoneEndLng",
+                        "id",
+                        "votes",
+                        "votesCount"
+                    ).joinToString(",")
+                    w.appendLine(header)
+
+                    fun writeHazardRow(hazard: com.roadwatch.data.Hazard, activeOverride: Boolean?, votes: Int) {
+                        val row = listOf(
+                            hazard.type.name,
+                            hazard.lat.toString(),
+                            hazard.lng.toString(),
+                            hazard.source,
+                            (activeOverride ?: hazard.active).toString(),
+                            hazard.directionality,
+                            hazard.reportedHeadingDeg.toString(),
+                            hazard.userBearing?.toString().orEmpty(),
+                            hazard.createdAt.toString(),
+                            hazard.updatedAt.toString(),
+                            hazard.speedLimitKph?.toString().orEmpty(),
+                            hazard.zoneLengthMeters?.toString().orEmpty(),
+                            hazard.zoneStartLat?.toString().orEmpty(),
+                            hazard.zoneStartLng?.toString().orEmpty(),
+                            hazard.zoneEndLat?.toString().orEmpty(),
+                            hazard.zoneEndLng?.toString().orEmpty(),
+                            hazard.id.orEmpty(),
+                            votes.toString(),
+                            hazard.votesCount.toString()
+                        )
+                        w.appendLine(row.joinToString(","))
+                    }
+
+                    // Seeds with active status based on overrides
+                    seeds.forEach { hazard ->
+                        val key = com.roadwatch.data.SeedOverrides.keyOf(hazard)
+                        val active = hazard.active && !com.roadwatch.data.SeedOverrides.isDisabled(requireContext(), key)
                         val votes = com.roadwatch.data.CommunityVotes.getVotes(requireContext(), key)
-                        w.appendLine("${h.type},${h.lat},${h.lng},SEED,${active},${votes},${h.directionality},,${h.speedLimitKph ?: ""},${h.zoneLengthMeters ?: ""},${h.zoneStartLat ?: ""},${h.zoneStartLng ?: ""},${h.zoneEndLat ?: ""},${h.zoneEndLng ?: ""}")
+                        writeHazardRow(hazard, active, votes)
                     }
                     // User hazards
-                    users.forEach { h ->
-                        val key = com.roadwatch.data.SeedOverrides.keyOf(h)
+                    users.forEach { hazard ->
+                        val key = com.roadwatch.data.SeedOverrides.keyOf(hazard)
                         val votes = com.roadwatch.data.CommunityVotes.getVotes(requireContext(), key)
-                        w.appendLine("${h.type},${h.lat},${h.lng},USER,${h.active},${votes},${h.directionality},${h.createdAt},${h.speedLimitKph ?: ""},${h.zoneLengthMeters ?: ""},${h.zoneStartLat ?: ""},${h.zoneStartLng ?: ""},${h.zoneEndLat ?: ""},${h.zoneEndLng ?: ""}")
-                }
+                        writeHazardRow(hazard, null, votes)
+                    }
                 }
                 // Also copy to public Downloads/RoadWatch (Android Q+)
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
@@ -534,36 +581,57 @@ private fun SettingsFragment.importFromReader(reader: java.io.Reader) {
     var imported = 0
     reader.useLines { lines ->
         val iter = lines.iterator()
-        if (iter.hasNext()) iter.next() // header
+        if (!iter.hasNext()) return@useLines
+        val header = iter.next().split(',', ignoreCase = false, limit = -1).map { it.trim() }
+        val indexByName = header.mapIndexed { index, name -> name.lowercase(Locale.US) to index }.toMap()
         while (iter.hasNext()) {
             val raw = iter.next().trim()
             if (raw.isEmpty()) continue
-            val cols = raw.split(',')
+            val cols = raw.split(',', ignoreCase = false, limit = -1)
+            fun valueFor(vararg keys: String): String? {
+                for (key in keys) {
+                    val idx = indexByName[key.lowercase(Locale.US)] ?: continue
+                    if (idx in cols.indices) {
+                        val value = cols[idx].trim()
+                        if (value.isNotEmpty()) return value
+                    }
+                }
+                return null
+            }
             try {
-                val type = com.roadwatch.data.HazardType.valueOf(cols[0])
-                val lat = cols[1].toDouble()
-                val lng = cols[2].toDouble()
-                val source = cols.getOrNull(3) ?: "USER"
-                val active = cols.getOrNull(4)?.toBooleanStrictOrNull() ?: true
-                val votes = cols.getOrNull(5)?.toIntOrNull() ?: 0
-                val directionality = cols.getOrNull(6) ?: "UNKNOWN"
-                val createdAtStr = cols.getOrNull(7) ?: ""
-                val speedKph = cols.getOrNull(8)?.toIntOrNull()
-                val zoneLen = cols.getOrNull(9)?.toIntOrNull()
-                val zoneStartLat = cols.getOrNull(10)?.toDoubleOrNull()
-                val zoneStartLng = cols.getOrNull(11)?.toDoubleOrNull()
-                val zoneEndLat = cols.getOrNull(12)?.toDoubleOrNull()
-                val zoneEndLng = cols.getOrNull(13)?.toDoubleOrNull()
-                val createdAt = try {
-                    if (createdAtStr.isNotBlank()) java.time.Instant.parse(createdAtStr) else java.time.Instant.now()
-                } catch (_: Exception) { java.time.Instant.now() }
+                val typeName = valueFor("type") ?: continue
+                val type = com.roadwatch.data.HazardType.valueOf(typeName.uppercase(Locale.US))
+                val lat = valueFor("lat")?.toDoubleOrNull() ?: continue
+                val lng = valueFor("lng", "lon", "long")?.toDoubleOrNull() ?: continue
+                val source = valueFor("source")?.uppercase(Locale.US) ?: "USER"
+                val active = valueFor("active")?.lowercase(Locale.US)?.toBooleanStrictOrNull() ?: true
+                val votes = valueFor("votes")?.toIntOrNull() ?: 0
+                val directionality = valueFor("directionality")?.uppercase(Locale.US) ?: "UNKNOWN"
+                val reportedHeading = valueFor("reportedheadingdeg", "reported_heading_deg")?.toFloatOrNull() ?: 0f
+                val userBearing = valueFor("userbearing")?.toFloatOrNull()
+                val createdAt = valueFor("createdat", "created_at")?.let {
+                    try { java.time.Instant.parse(it) } catch (_: Exception) { java.time.Instant.now() }
+                } ?: java.time.Instant.now()
+                val updatedAt = valueFor("updatedat", "updated_at")?.let {
+                    try { java.time.Instant.parse(it) } catch (_: Exception) { createdAt }
+                } ?: createdAt
+                val speedKph = valueFor("speedlimitkph", "speed_limit_kph")?.toIntOrNull()
+                val zoneLen = valueFor("zonelengthmeters", "zone_length_meters")?.toIntOrNull()
+                val zoneStartLat = valueFor("zonestartlat", "zone_start_lat")?.toDoubleOrNull()
+                val zoneStartLng = valueFor("zonestartlng", "zone_start_lng")?.toDoubleOrNull()
+                val zoneEndLat = valueFor("zoneendlat", "zone_end_lat")?.toDoubleOrNull()
+                val zoneEndLng = valueFor("zoneendlng", "zone_end_lng")?.toDoubleOrNull()
+                val id = valueFor("id")
+                val votesCount = valueFor("votescount", "votes_count")?.toIntOrNull() ?: votes
                 val h = com.roadwatch.data.Hazard(
                     type = type,
                     lat = lat,
                     lng = lng,
+                    source = source,
                     active = active,
                     directionality = directionality,
-                    reportedHeadingDeg = 0.0f,
+                    reportedHeadingDeg = reportedHeading,
+                    userBearing = userBearing,
                     speedLimitKph = speedKph,
                     zoneLengthMeters = zoneLen,
                     zoneStartLat = zoneStartLat,
@@ -571,6 +639,9 @@ private fun SettingsFragment.importFromReader(reader: java.io.Reader) {
                     zoneEndLat = zoneEndLat,
                     zoneEndLng = zoneEndLng,
                     createdAt = createdAt,
+                    updatedAt = updatedAt,
+                    id = id,
+                    votesCount = votesCount,
                 )
                 val key = com.roadwatch.data.SeedOverrides.keyOf(h)
                 val localVotes = com.roadwatch.data.CommunityVotes.getVotes(requireContext(), key)
