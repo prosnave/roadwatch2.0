@@ -44,7 +44,7 @@
     <!-- Speed + Direction card -->
     <com.google.android.material.card.MaterialCardView android:id="@+id/speed_card" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_margin="16dp" app:cardCornerRadius="18dp" app:cardElevation="8dp" app:layout_constraintTop_toTopOf="parent" app:layout_constraintStart_toStartOf="parent" app:layout_constraintEnd_toEndOf="parent">
 
-        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:padding="16dp" android:gravity="center">
+        <LinearLayout android:id="@+id/speed_card_content" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:padding="16dp" android:gravity="center">
 
             <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical" android:gravity="center">
                 <TextView android:id="@+id/txt_speed_value" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="0" android:textStyle="bold" android:textSize="40sp"/>

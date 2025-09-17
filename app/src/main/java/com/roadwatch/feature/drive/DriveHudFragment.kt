@@ -40,6 +40,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
 import androidx.activity.result.contract.ActivityResultContracts
+import android.util.TypedValue
+import android.widget.LinearLayout
 
 class DriveHudFragment : Fragment() {
     private val ioScope = CoroutineScope(Dispatchers.IO)
@@ -55,6 +57,12 @@ class DriveHudFragment : Fragment() {
     private val idleTimeoutMs = 120_000L
     private var providersReceiver: BroadcastReceiver? = null
     private var overlayReceiver: BroadcastReceiver? = null
+    private var baseSpeedTextSizePx = 0f
+    private var baseBearingTextSizePx = 0f
+    private var baseLabelTextSizePx = 0f
+    private var baseSubtitleTextSizePx = 0f
+    private var baseCardPaddingHorizontalPx = 0
+    private var baseCardPaddingVerticalPx = 0
 
     private val requestPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
@@ -162,6 +170,25 @@ class DriveHudFragment : Fragment() {
         val btnStop = view.findViewById<Button>(R.id.btn_stop)
         txtSpeed = view.findViewById(R.id.txt_speed_value)
         txtBearing = view.findViewById(R.id.txt_bearing_value)
+        if (baseSpeedTextSizePx == 0f) {
+            baseSpeedTextSizePx = txtSpeed?.textSize ?: 0f
+        }
+        if (baseBearingTextSizePx == 0f) {
+            baseBearingTextSizePx = txtBearing?.textSize ?: 0f
+        }
+        val speedLabel = view.findViewById<android.widget.TextView>(R.id.txt_speed_label)
+        val subtitleView = view.findViewById<android.widget.TextView>(R.id.txt_next_subtitle)
+        val speedCardContent = view.findViewById<LinearLayout>(R.id.speed_card_content)
+        if (baseLabelTextSizePx == 0f) {
+            baseLabelTextSizePx = speedLabel?.textSize ?: 0f
+        }
+        if (baseSubtitleTextSizePx == 0f) {
+            baseSubtitleTextSizePx = subtitleView?.textSize ?: 0f
+        }
+        if (baseCardPaddingHorizontalPx == 0 && speedCardContent != null) {
+            baseCardPaddingHorizontalPx = speedCardContent.paddingStart
+            baseCardPaddingVerticalPx = speedCardContent.paddingTop
+        }
 
         val btnReportBump = view.findViewById<com.google.android.material.button.MaterialButton>(R.id.btn_report_bump)
         val btnReportPothole = view.findViewById<com.google.android.material.button.MaterialButton>(R.id.btn_report_pothole)
@@ -303,6 +330,7 @@ class DriveHudFragment : Fragment() {
         private const val MIN_HEADING_AGREE_DEG = 15.0
         private const val ONE_WAY_MAX_HEADING_DEG = 10.0
         private const val MAX_LATERAL_OFFSET_METERS = 7.0
+        private const val PRIORITY_WEIGHT_METERS = 75.0
     }
 
     private fun vectorToBitmapDescriptor(resId: Int, scale: Float = 1.0f): BitmapDescriptor {
@@ -520,6 +548,7 @@ class DriveHudFragment : Fragment() {
         var best: com.roadwatch.data.Hazard? = null
         var bestAlong = Double.MAX_VALUE
         var bestDist = Double.MAX_VALUE
+        var bestScore = Double.MAX_VALUE
 
         hazards.forEach { h ->
             val (tLat, tLng) = targetPoint(h)
@@ -533,10 +562,13 @@ class DriveHudFragment : Fragment() {
             if (kotlin.math.abs(lateral) > MAX_LATERAL_OFFSET_METERS) return@forEach
             val along = d * kotlin.math.cos(bTo - heading)
             if (along <= 0.0) return@forEach
-            if (along < bestAlong) {
+            val priority = hazardPriority(h.type)
+            val score = priority * PRIORITY_WEIGHT_METERS + along
+            if (score < bestScore || (kotlin.math.abs(score - bestScore) < 1e-3 && along < bestAlong)) {
                 best = h
                 bestAlong = along
                 bestDist = d
+                bestScore = score
             }
         }
 
@@ -566,31 +598,34 @@ class DriveHudFragment : Fragment() {
         val warnBg = ContextCompat.getColor(ctx, R.color.error_container)
         val warnFg = ContextCompat.getColor(ctx, R.color.on_error_container)
 
-        var bg = neutralBg
-        var fg = neutralFg
-        var stroke = neutralStroke
-        var subtitleColor = ContextCompat.getColor(ctx, R.color.on_surface_variant)
+        val urgency = when {
+            nextAlongMeters != null && nextAlongMeters <= 75.0 -> HazardUrgency.WARN
+            nextAlongMeters != null && nextAlongMeters <= 200.0 -> HazardUrgency.CAUTION
+            else -> HazardUrgency.NEUTRAL
+        }
 
-        if (nextAlongMeters != null) {
-            when {
-                nextAlongMeters <= 75.0 -> {
-                    bg = warnBg
-                    fg = warnFg
-                    stroke = warnBg
-                    subtitleColor = warnFg
-                }
-                nextAlongMeters <= 200.0 -> {
-                    bg = cautionBg
-                    fg = cautionFg
-                    stroke = cautionStroke
-                    subtitleColor = cautionFg
-                }
-                else -> {
-                    bg = neutralBg
-                    fg = neutralFg
-                    stroke = neutralStroke
-                    subtitleColor = ContextCompat.getColor(ctx, R.color.on_surface_variant)
-                }
+        val bg: Int
+        val fg: Int
+        val stroke: Int
+        val subtitleColor: Int
+        when (urgency) {
+            HazardUrgency.WARN -> {
+                bg = warnBg
+                fg = warnFg
+                stroke = warnBg
+                subtitleColor = warnFg
+            }
+            HazardUrgency.CAUTION -> {
+                bg = cautionBg
+                fg = cautionFg
+                stroke = cautionStroke
+                subtitleColor = cautionFg
+            }
+            HazardUrgency.NEUTRAL -> {
+                bg = neutralBg
+                fg = neutralFg
+                stroke = neutralStroke
+                subtitleColor = ContextCompat.getColor(ctx, R.color.on_surface_variant)
             }
         }
 
@@ -608,6 +643,59 @@ class DriveHudFragment : Fragment() {
             view?.findViewById<android.widget.TextView>(R.id.txt_direction_label)
         )
         labels.forEach { it.setTextColor(fg) }
+
+        val speedMultiplier: Float
+        val labelMultiplier: Float
+        val subtitleMultiplier: Float
+        val paddingMultiplier: Float
+        val scale: Float
+        when (urgency) {
+            HazardUrgency.WARN -> {
+                speedMultiplier = 1.8f
+                labelMultiplier = 1.5f
+                subtitleMultiplier = 1.6f
+                paddingMultiplier = 2.2f
+                scale = 1.2f
+            }
+            HazardUrgency.CAUTION -> {
+                speedMultiplier = 1.4f
+                labelMultiplier = 1.25f
+                subtitleMultiplier = 1.3f
+                paddingMultiplier = 1.6f
+                scale = 1.05f
+            }
+            HazardUrgency.NEUTRAL -> {
+                speedMultiplier = 1.0f
+                labelMultiplier = 1.0f
+                subtitleMultiplier = 1.0f
+                paddingMultiplier = 1.0f
+                scale = 1.0f
+            }
+        }
+
+        if (baseSpeedTextSizePx > 0f) {
+            txtSpeed?.setTextSize(TypedValue.COMPLEX_UNIT_PX, baseSpeedTextSizePx * speedMultiplier)
+        }
+        if (baseBearingTextSizePx > 0f) {
+            txtBearing?.setTextSize(TypedValue.COMPLEX_UNIT_PX, baseBearingTextSizePx * speedMultiplier)
+        }
+        val speedLabel = view?.findViewById<android.widget.TextView>(R.id.txt_speed_label)
+        val directionLabel = view?.findViewById<android.widget.TextView>(R.id.txt_direction_label)
+        if (baseLabelTextSizePx > 0f) {
+            speedLabel?.setTextSize(TypedValue.COMPLEX_UNIT_PX, baseLabelTextSizePx * labelMultiplier)
+            directionLabel?.setTextSize(TypedValue.COMPLEX_UNIT_PX, baseLabelTextSizePx * labelMultiplier)
+        }
+        if (baseSubtitleTextSizePx > 0f) {
+            subtitle?.setTextSize(TypedValue.COMPLEX_UNIT_PX, baseSubtitleTextSizePx * subtitleMultiplier)
+        }
+        val content = view?.findViewById<LinearLayout>(R.id.speed_card_content)
+        if (content != null && baseCardPaddingHorizontalPx > 0) {
+            val hPad = (baseCardPaddingHorizontalPx * paddingMultiplier).toInt()
+            val vPad = (baseCardPaddingVerticalPx * paddingMultiplier).toInt()
+            content.setPadding(hPad, vPad, hPad, vPad)
+        }
+
+        card.animate().scaleX(scale).scaleY(scale).setDuration(200L).start()
     }
 
     private fun targetPoint(h: com.roadwatch.data.Hazard): Pair<Double, Double> {
@@ -894,6 +982,17 @@ class DriveHudFragment : Fragment() {
         notifyRefresh()
         com.roadwatch.ui.UiAlerts.success(view, "Location updated")
     }
+
+    private fun hazardPriority(type: HazardType): Int = when (type) {
+        HazardType.SPEED_BUMP -> 0
+        HazardType.SPEED_LIMIT_ZONE -> 1
+        HazardType.POTHOLE -> 1
+        HazardType.RUMBLE_STRIP -> 2
+    }
+
+    private enum class HazardUrgency { NEUTRAL, CAUTION, WARN }
+
+    private fun Double.format(digits: Int = 6): String = String.format(Locale.US, "%.${digits}f", this)
 
     private fun notifyRefresh() {
         try {
