@@ -40,4 +40,7 @@
     <string name="mark_wrong_direction">Mark wrong direction</string>
     <string name="move_pin_opposite_prompt">Direction flipped. Tap the correct lane to place the hazard.</string>
     <string name="tap_map_set_location">Tap map to set new location for this hazard.</string>
+    <string name="import_hazards_title">Import Hazards</string>
+    <string name="import_close">Close</string>
+    <string name="import_progress_summary">Processed %1$d / %2$d • Imported %3$d • Skipped %4$d</string>
 </resources>

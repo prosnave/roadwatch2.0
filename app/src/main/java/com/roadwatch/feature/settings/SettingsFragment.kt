@@ -1,6 +1,7 @@
 package com.roadwatch.feature.settings
 
 import android.Manifest
+import android.app.AlertDialog
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -9,6 +10,8 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.ProgressBar
+import android.widget.ScrollView
 import android.widget.TextView
 import androidx.fragment.app.Fragment
 import androidx.activity.result.contract.ActivityResultContracts
@@ -22,6 +25,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.io.File
 import java.util.Locale
+import java.util.concurrent.CountDownLatch
 
 class SettingsFragment : Fragment() {
     private val ioScope = CoroutineScope(Dispatchers.IO)
@@ -299,8 +303,12 @@ class SettingsFragment : Fragment() {
                 ioScope.launch {
                     val exportDir = File(requireContext().filesDir, "exports")
                     val file = File(exportDir, "hazards_export.csv")
-                    if (file.exists()) importFromReader(file.bufferedReader()) else requireActivity().runOnUiThread {
-                        status.text = "No export file found."
+                    if (file.exists()) {
+                        importFromCsvText(file.readText())
+                    } else {
+                        requireActivity().runOnUiThread {
+                            status.text = "No export file found."
+                        }
                     }
                 }
             }
@@ -448,88 +456,204 @@ class SettingsFragment : Fragment() {
 }
 
 // Import helpers
-private fun SettingsFragment.importFromReader(reader: java.io.Reader) {
+private fun SettingsFragment.importFromCsvText(csvText: String) {
+    val rawLines = csvText.lineSequence()
+        .map { it.trimEnd('\r') }
+        .toList()
+    val headerIndex = rawLines.indexOfFirst { it.isNotBlank() }
+    if (headerIndex == -1) {
+        requireActivity().runOnUiThread {
+            view?.findViewById<TextView>(R.id.txt_status)?.text = "No rows imported"
+        }
+        return
+    }
+    val header = rawLines[headerIndex].split(',').map { it.trim() }
+    val dataLines = rawLines.drop(headerIndex + 1)
+    val totalRows = dataLines.count { it.isNotBlank() }
+    if (totalRows == 0) {
+        requireActivity().runOnUiThread {
+            view?.findViewById<TextView>(R.id.txt_status)?.text = "No rows imported"
+        }
+        return
+    }
+
+    val progressUi = showImportProgressDialog(totalRows)
+
+    val indexByName = header.mapIndexed { index, name -> name.lowercase(Locale.US) to index }.toMap()
     var imported = 0
-    reader.useLines { lines ->
-        val iter = lines.iterator()
-        if (!iter.hasNext()) return@useLines
-        val header = iter.next().split(',', ignoreCase = false, limit = -1).map { it.trim() }
-        val indexByName = header.mapIndexed { index, name -> name.lowercase(Locale.US) to index }.toMap()
-        while (iter.hasNext()) {
-            val raw = iter.next().trim()
-            if (raw.isEmpty()) continue
-            val cols = raw.split(',', ignoreCase = false, limit = -1)
-            fun valueFor(vararg keys: String): String? {
-                for (key in keys) {
-                    val idx = indexByName[key.lowercase(Locale.US)] ?: continue
-                    if (idx in cols.indices) {
-                        val value = cols[idx].trim()
-                        if (value.isNotEmpty()) return value
+    var processed = 0
+    var skipped = 0
+    val failures = mutableListOf<String>()
+
+    fun valueFor(cols: List<String>, vararg keys: String): String? {
+        for (key in keys) {
+            val idx = indexByName[key.lowercase(Locale.US)] ?: continue
+            if (idx in cols.indices) {
+                val value = cols[idx].trim()
+                if (value.isNotEmpty()) return value
+            }
+        }
+        return null
+    }
+
+    dataLines.forEachIndexed { offset, rawLine ->
+        val lineNumber = headerIndex + offset + 2
+        val raw = rawLine.trim()
+        if (raw.isEmpty()) return@forEachIndexed
+        val cols = raw.split(',', limit = header.size)
+        processed += 1
+        try {
+            val typeName = valueFor(cols, "type") ?: throw IllegalArgumentException("Missing type")
+            val type = com.roadwatch.data.HazardType.valueOf(typeName.uppercase(Locale.US))
+            val lat = valueFor(cols, "lat")?.toDoubleOrNull() ?: throw IllegalArgumentException("Invalid lat")
+            val lng = valueFor(cols, "lng", "lon", "long")?.toDoubleOrNull() ?: throw IllegalArgumentException("Invalid lng")
+            val source = valueFor(cols, "source")?.uppercase(Locale.US) ?: "USER"
+            val active = valueFor(cols, "active")?.let { it.equals("true", ignoreCase = true) || it == "1" } ?: true
+            val votes = valueFor(cols, "votes")?.toIntOrNull() ?: 0
+            val directionality = valueFor(cols, "directionality")?.uppercase(Locale.US) ?: "UNKNOWN"
+            val reportedHeading = valueFor(cols, "reportedHeadingDeg", "reported_heading_deg")?.toFloatOrNull() ?: 0f
+            val userBearing = valueFor(cols, "userBearing")?.toFloatOrNull()
+            val createdAt = valueFor(cols, "createdAt", "created_at")?.let {
+                try {
+                    java.time.Instant.parse(it)
+                } catch (e: java.time.format.DateTimeParseException) {
+                    try {
+                        val formatter = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSSSSS Z")
+                        java.time.ZonedDateTime.parse(it, formatter).toInstant()
+                    } catch (_: Exception) {
+                        java.time.Instant.now()
                     }
                 }
-                return null
+            } ?: java.time.Instant.now()
+            val speedKph = valueFor(cols, "speedLimitKph", "speed_limit_kph")?.toIntOrNull()
+            val zoneLen = valueFor(cols, "zoneLengthMeters", "zone_length_meters")?.toIntOrNull()
+            val zoneStartLat = valueFor(cols, "zonestartlat", "zone_start_lat")?.toDoubleOrNull()
+            val zoneStartLng = valueFor(cols, "zonestartlng", "zone_start_lng")?.toDoubleOrNull()
+            val zoneEndLat = valueFor(cols, "zoneendlat", "zone_end_lat")?.toDoubleOrNull()
+            val zoneEndLng = valueFor(cols, "zoneendlng", "zone_end_lng")?.toDoubleOrNull()
+            val hazard = com.roadwatch.data.Hazard(
+                type = type,
+                lat = lat,
+                lng = lng,
+                source = source,
+                active = active,
+                directionality = directionality,
+                reportedHeadingDeg = reportedHeading,
+                userBearing = userBearing,
+                speedLimitKph = speedKph,
+                zoneLengthMeters = zoneLen,
+                zoneStartLat = zoneStartLat,
+                zoneStartLng = zoneStartLng,
+                zoneEndLat = zoneEndLat,
+                zoneEndLng = zoneEndLng,
+                createdAt = createdAt,
+            )
+            val key = com.roadwatch.data.SeedOverrides.keyOf(hazard)
+            val localVotes = com.roadwatch.data.CommunityVotes.getVotes(requireContext(), key)
+            if (votes > localVotes) com.roadwatch.data.CommunityVotes.setVotes(requireContext(), key, votes)
+            if (source == "USER") {
+                com.roadwatch.data.HazardStore(requireContext()).upsertByKey(key, hazard)
+            } else {
+                com.roadwatch.data.SeedOverrides.setDisabled(requireContext(), key, !active)
             }
-            try {
-                val typeName = valueFor("type") ?: continue
-                val type = com.roadwatch.data.HazardType.valueOf(typeName.uppercase(Locale.US))
-                val lat = valueFor("lat")?.toDoubleOrNull() ?: continue
-                val lng = valueFor("lng", "lon", "long")?.toDoubleOrNull() ?: continue
-                val source = valueFor("source")?.uppercase(Locale.US) ?: "USER"
-                val active = valueFor("active")?.lowercase(Locale.US)?.toBooleanStrictOrNull() ?: true
-                val votes = valueFor("votes")?.toIntOrNull() ?: 0
-                val directionality = valueFor("directionality")?.uppercase(Locale.US) ?: "UNKNOWN"
-                val reportedHeading = valueFor("reportedheadingdeg", "reported_heading_deg")?.toFloatOrNull() ?: 0f
-                val userBearing = valueFor("userbearing")?.toFloatOrNull()
-                val createdAt = valueFor("createdat", "created_at")?.let {
-                    try { java.time.Instant.parse(it) } catch (_: Exception) { java.time.Instant.now() }
-                } ?: java.time.Instant.now()
-                val speedKph = valueFor("speedlimitkph", "speed_limit_kph")?.toIntOrNull()
-                val zoneLen = valueFor("zonelengthmeters", "zone_length_meters")?.toIntOrNull()
-                val zoneStartLat = valueFor("zonestartlat", "zone_start_lat")?.toDoubleOrNull()
-                val zoneStartLng = valueFor("zonestartlng", "zone_start_lng")?.toDoubleOrNull()
-                val zoneEndLat = valueFor("zoneendlat", "zone_end_lat")?.toDoubleOrNull()
-                val zoneEndLng = valueFor("zoneendlng", "zone_end_lng")?.toDoubleOrNull()
-                val h = com.roadwatch.data.Hazard(
-                    type = type,
-                    lat = lat,
-                    lng = lng,
-                    source = source,
-                    active = active,
-                    directionality = directionality,
-                    reportedHeadingDeg = reportedHeading,
-                    userBearing = userBearing,
-                    speedLimitKph = speedKph,
-                    zoneLengthMeters = zoneLen,
-                    zoneStartLat = zoneStartLat,
-                    zoneStartLng = zoneStartLng,
-                    zoneEndLat = zoneEndLat,
-                    zoneEndLng = zoneEndLng,
-                    createdAt = createdAt,
-                )
-                val key = com.roadwatch.data.SeedOverrides.keyOf(h)
-                val localVotes = com.roadwatch.data.CommunityVotes.getVotes(requireContext(), key)
-                if (votes > localVotes) com.roadwatch.data.CommunityVotes.setVotes(requireContext(), key, votes)
-                if (source == "USER") {
-                    com.roadwatch.data.HazardStore(requireContext()).upsertByKey(key, h)
-                } else {
-                    com.roadwatch.data.SeedOverrides.setDisabled(requireContext(), key, !active)
-                }
-                imported++
-            } catch (_: Exception) {}
+            imported += 1
+            progressUi.update(this, processed, totalRows, imported, skipped,
+                "✔ Row $lineNumber • ${type.name} (${lat.format()}, ${lng.format()})")
+        } catch (e: Exception) {
+            skipped += 1
+            val reason = e.message ?: e::class.java.simpleName
+            failures += "Row $lineNumber: $reason"
+            progressUi.update(this, processed, totalRows, imported, skipped,
+                "✖ Row $lineNumber • $reason")
         }
     }
+
+    progressUi.complete(this, totalRows, imported, skipped)
+
+    if (failures.isNotEmpty()) {
+        try {
+            val errorFile = File(requireContext().filesDir, "imports/last_import_errors.txt").apply { parentFile?.mkdirs() }
+            errorFile.writeText(failures.joinToString(System.lineSeparator()))
+        } catch (_: Exception) {}
+    }
+
+    val summaryText = if (totalRows == 0) {
+        "No rows imported"
+    } else {
+        val skippedMsg = if (skipped == 0) "" else " Skipped $skipped. See files/imports/last_import_errors.txt"
+        "Imported $imported of $totalRows rows.$skippedMsg"
+    }
+
     requireActivity().runOnUiThread {
-        val status = view?.findViewById<TextView>(R.id.txt_status)
-        status?.text = if (imported > 0) "Imported $imported rows (merged)" else "No rows imported"
+        view?.findViewById<TextView>(R.id.txt_status)?.text = summaryText
     }
 }
 
 private suspend fun SettingsFragment.importFromUri(uri: Uri) {
-    val cr = requireContext().contentResolver
-    cr.openInputStream(uri)?.bufferedReader()?.use {
-        importFromReader(it)
-    } ?: requireActivity().runOnUiThread {
-        val status = view?.findViewById<TextView>(R.id.txt_status)
-        status?.text = "Failed to open selected file"
+    val csv = requireContext().contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+    if (csv != null) {
+        importFromCsvText(csv)
+    } else {
+        requireActivity().runOnUiThread {
+            view?.findViewById<TextView>(R.id.txt_status)?.text = "Failed to open selected file"
+        }
     }
 }
+
+private fun SettingsFragment.showImportProgressDialog(totalRows: Int): ImportProgressUi {
+    val latch = CountDownLatch(1)
+    var holder: ImportProgressUi? = null
+    requireActivity().runOnUiThread {
+        val dialogView = layoutInflater.inflate(R.layout.dialog_import_progress, null)
+        val summary = dialogView.findViewById<TextView>(R.id.txt_progress_summary)
+        val details = dialogView.findViewById<TextView>(R.id.txt_progress_details)
+        val progressBar = dialogView.findViewById<ProgressBar>(R.id.progress_bar)
+        val scroll = dialogView.findViewById<ScrollView>(R.id.scroll_details)
+        progressBar.max = totalRows
+        summary.text = getString(R.string.import_progress_summary, 0, totalRows, 0, 0)
+
+        val dialog = AlertDialog.Builder(requireContext())
+            .setTitle(R.string.import_hazards_title)
+            .setView(dialogView)
+            .setPositiveButton(R.string.import_close, null)
+            .setCancelable(false)
+            .create()
+        dialog.setCanceledOnTouchOutside(false)
+        dialog.show()
+        val closeButton = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+        closeButton.isEnabled = false
+        holder = ImportProgressUi(dialog, summary, details, progressBar, closeButton, scroll)
+        latch.countDown()
+    }
+    latch.await()
+    return holder!!
+}
+
+private data class ImportProgressUi(
+    val dialog: AlertDialog,
+    val summary: TextView,
+    val details: TextView,
+    val progressBar: ProgressBar,
+    val closeButton: Button,
+    val scroll: ScrollView,
+) {
+    fun update(fragment: SettingsFragment, processed: Int, total: Int, imported: Int, skipped: Int, message: String) {
+        fragment.requireActivity().runOnUiThread {
+            summary.text = fragment.getString(R.string.import_progress_summary, processed, total, imported, skipped)
+            progressBar.progress = processed
+            if (details.text.isNotEmpty()) details.append("\n")
+            details.append(message)
+            scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
+        }
+    }
+
+    fun complete(fragment: SettingsFragment, total: Int, imported: Int, skipped: Int) {
+        fragment.requireActivity().runOnUiThread {
+            summary.text = fragment.getString(R.string.import_progress_summary, total, total, imported, skipped)
+            progressBar.progress = total
+            closeButton.isEnabled = true
+        }
+    }
+}
+
+private fun Double.format(digits: Int = 6): String = String.format(Locale.US, "%.${digits}f", this).trim()

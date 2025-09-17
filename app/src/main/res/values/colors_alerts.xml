@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="alert_success">#2E7D32</color>
-    <color name="alert_error">#C62828</color>
-    <color name="alert_info">#1565C0</color>
-    <color name="alert_warn">#F57C00</color>
+    <color name="alert_success">#00FF00</color>
+    <color name="alert_error">#FF0000</color>
+    <color name="alert_info">#0000FF</color>
+    <color name="alert_warn">#FFA500</color>
 </resources>
