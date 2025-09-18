@@ -21,6 +21,10 @@
     <color name="error_container">#FAD0D3</color>
     <color name="on_error_container">#5F0A10</color>
 
+    <color name="hazard_warn_background">#B00020</color> <!-- Bold warning red for critical hazards -->
+    <color name="hazard_warn_on_background">#FFFFFF</color>
+    <color name="hazard_warn_stroke">#FF1744</color>
+
     <color name="background">#F5F5F5</color> <!-- Light Concrete -->
     <color name="on_background">#2C2C2C</color>
     <color name="surface">#FFFFFF</color>

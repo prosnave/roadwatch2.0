@@ -2,16 +2,19 @@ package com.roadwatch.alerts
 
 import android.content.Context
 import android.location.Location
-import android.util.Log
 import com.roadwatch.data.Hazard
 import com.roadwatch.data.SeedRepository
-import com.roadwatch.notifications.NotificationHelper
 import android.speech.tts.TextToSpeech
 import com.roadwatch.prefs.AppPrefs
-import android.media.AudioManager
+import android.media.AudioAttributes
+import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.os.Build
+import android.os.Bundle
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.*
 
 class AlertManager(private val context: Context) {
@@ -27,14 +30,7 @@ class AlertManager(private val context: Context) {
             ttsReady = status == TextToSpeech.SUCCESS
             if (ttsReady) {
                 tts?.language = Locale.getDefault()
-                try {
-                    tts?.setAudioAttributes(
-                        android.media.AudioAttributes.Builder()
-                            .setUsage(android.media.AudioAttributes.USAGE_ALARM)
-                            .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
-                            .build()
-                    )
-                } catch (_: Throwable) {}
+                updateTtsAudioAttributes(false)
             }
         }
     }
@@ -96,7 +92,6 @@ class AlertManager(private val context: Context) {
                             try { com.roadwatch.core.util.Haptics.tap(context) } catch (_: Exception) {}
                         }
                         if (ttsReady && AppPrefs.isAudioEnabled(context)) {
-                            ensurePlaybackVolume()
                             val f = followUp
                             if (f != null) speakDouble(text, f) else speakWithFocus(text)
                         }
@@ -153,7 +148,6 @@ class AlertManager(private val context: Context) {
             try { com.roadwatch.core.util.Haptics.tap(context) } catch (_: Exception) {}
         }
         if (ttsReady && AppPrefs.isAudioEnabled(context)) {
-            ensurePlaybackVolume()
             val f = followUp
             if (f != null) speakDouble(text, f) else speakWithFocus(text)
         }
@@ -164,79 +158,193 @@ class AlertManager(private val context: Context) {
     }
 
     private fun speakWithFocus(text: String) {
-        val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        val mode = AppPrefs.getAudioFocusMode(context)
-        val focusGain = if (mode == "EXCLUSIVE") AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE else AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
-        var focusGranted = true
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val afr = AudioFocusRequest.Builder(focusGain)
-                .setAudioAttributes(
-                    android.media.AudioAttributes.Builder()
-                        .setUsage(android.media.AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
-                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
-                        .build()
-                )
-                .build()
-            focusGranted = am.requestAudioFocus(afr) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
-            tts?.setOnUtteranceProgressListener(object: android.speech.tts.UtteranceProgressListener() {
-                @Suppress("OverridingDeprecatedMember")
-                override fun onStart(utteranceId: String?) {}
-                override fun onError(utteranceId: String?) { am.abandonAudioFocusRequest(afr) }
-                override fun onDone(utteranceId: String?) { am.abandonAudioFocusRequest(afr) }
-            })
-        }
-        if (focusGranted) {
-            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "rw_live")
-        } else {
-            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "rw_live")
-        }
+        speakUtterances(listOf(text))
     }
 
     private fun speakDouble(first: String, second: String) {
+        speakUtterances(listOf(first, second))
+    }
+
+    private fun speakUtterances(lines: List<String>) {
+        if (lines.isEmpty()) return
         val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val route = prepareAudioRoute(am)
+        if (!ttsReady) {
+            route.cleanup?.invoke()
+            return
+        }
+
+        ensurePlaybackVolume(route.stream)
         val mode = AppPrefs.getAudioFocusMode(context)
         val focusGain = if (mode == "EXCLUSIVE") AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE else AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
+        val usage = if (route.stream == AudioManager.STREAM_VOICE_CALL) {
+            AudioAttributes.USAGE_VOICE_COMMUNICATION
+        } else {
+            AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE
+        }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val afr = AudioFocusRequest.Builder(focusGain)
                 .setAudioAttributes(
-                    android.media.AudioAttributes.Builder()
-                        .setUsage(android.media.AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
-                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                    AudioAttributes.Builder()
+                        .setUsage(usage)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .setLegacyStreamType(route.stream)
                         .build()
                 )
                 .build()
-            val granted = am.requestAudioFocus(afr) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+            am.requestAudioFocus(afr)
+            val remaining = AtomicInteger(lines.size)
+            val cleaned = AtomicBoolean(false)
+            fun finish() {
+                if (cleaned.compareAndSet(false, true)) {
+                    try { am.abandonAudioFocusRequest(afr) } catch (_: Exception) {}
+                    route.cleanup?.invoke()
+                }
+            }
             tts?.setOnUtteranceProgressListener(object: android.speech.tts.UtteranceProgressListener() {
                 @Suppress("OverridingDeprecatedMember")
                 override fun onStart(utteranceId: String?) {}
-                override fun onError(utteranceId: String?) { am.abandonAudioFocusRequest(afr) }
-                override fun onDone(utteranceId: String?) { am.abandonAudioFocusRequest(afr) }
+                override fun onError(utteranceId: String?) { finish() }
+                override fun onDone(utteranceId: String?) {
+                    if (remaining.decrementAndGet() <= 0) finish()
+                }
             })
-            if (granted) {
-                tts?.speak(first, TextToSpeech.QUEUE_FLUSH, null, "rw_next_1")
-                tts?.speak(second, TextToSpeech.QUEUE_ADD, null, "rw_next_2")
-            } else {
-                tts?.speak(first, TextToSpeech.QUEUE_FLUSH, null, "rw_next_1")
-                tts?.speak(second, TextToSpeech.QUEUE_ADD, null, "rw_next_2")
-            }
+            speakTexts(lines, route.stream)
         } else {
-            // Legacy: no explicit focus
-            tts?.speak(first, TextToSpeech.QUEUE_FLUSH, null, "rw_next_1")
-            tts?.speak(second, TextToSpeech.QUEUE_ADD, null, "rw_next_2")
+            val remaining = AtomicInteger(lines.size)
+            val cleaned = AtomicBoolean(false)
+            fun finish() {
+                if (cleaned.compareAndSet(false, true)) {
+                    route.cleanup?.invoke()
+                }
+            }
+            tts?.setOnUtteranceProgressListener(object: android.speech.tts.UtteranceProgressListener() {
+                @Suppress("OverridingDeprecatedMember")
+                override fun onStart(utteranceId: String?) {}
+                override fun onError(utteranceId: String?) { finish() }
+                override fun onDone(utteranceId: String?) {
+                    if (remaining.decrementAndGet() <= 0) finish()
+                }
+            })
+            speakTexts(lines, route.stream)
         }
     }
 
-    // Ensure volume is at least 50% and ideally max before speaking
-    private fun ensurePlaybackVolume() {
+    private fun ensurePlaybackVolume(stream: Int) {
         try {
             val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-            val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-            val current = am.getStreamVolume(AudioManager.STREAM_MUSIC)
-            if (current < (max / 2)) {
-                am.setStreamVolume(AudioManager.STREAM_MUSIC, max, 0)
+            val max = am.getStreamMaxVolume(stream)
+            if (max <= 0) return
+            val current = am.getStreamVolume(stream)
+            if (current < max) {
+                am.setStreamVolume(stream, max, 0)
             }
         } catch (_: Exception) {}
     }
+
+    private fun speakTexts(lines: List<String>, stream: Int) {
+        val baseId = System.nanoTime().toString()
+        lines.forEachIndexed { index, line ->
+            val queueMode = if (index == 0) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
+            val utteranceId = "$baseId-$index"
+            speakText(line, queueMode, stream, utteranceId)
+        }
+    }
+
+    private fun speakText(text: String, queueMode: Int, stream: Int, utteranceId: String) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            val params = Bundle().apply {
+                putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, stream)
+            }
+            tts?.speak(text, queueMode, params, utteranceId)
+        } else {
+            val params = java.util.HashMap<String, String>().apply {
+                put(TextToSpeech.Engine.KEY_PARAM_STREAM, stream.toString())
+                put(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, utteranceId)
+            }
+            @Suppress("DEPRECATION")
+            tts?.speak(text, queueMode, params)
+        }
+    }
+
+    private fun prepareAudioRoute(am: AudioManager): AudioRoute {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val outputs = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+            val TYPE_BLUETOOTH_CAR_AUDIO = 26 // Added in API 34
+            val hasA2dp = outputs.any { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP || it.type == TYPE_BLUETOOTH_CAR_AUDIO }
+            if (hasA2dp) {
+                updateTtsAudioAttributes(false)
+                try { am.setSpeakerphoneOn(false) } catch (_: Exception) {}
+                return AudioRoute(AudioManager.STREAM_MUSIC, null)
+            }
+            val hasSco = outputs.any { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
+            if (hasSco && am.isBluetoothScoAvailableOffCall) {
+                val prevMode = am.mode
+                val prevSpeaker = am.isSpeakerphoneOn
+                val started = try {
+                    if (!am.isBluetoothScoOn) {
+                        am.mode = AudioManager.MODE_IN_COMMUNICATION
+                        am.setSpeakerphoneOn(false)
+                        am.startBluetoothSco()
+                        am.setBluetoothScoOn(true)
+                        true
+                    } else {
+                        false
+                    }
+                } catch (_: Exception) {
+                    try { am.mode = prevMode } catch (_: Exception) {}
+                    try { am.isSpeakerphoneOn = prevSpeaker } catch (_: Exception) {}
+                    false
+                }
+                updateTtsAudioAttributes(true)
+                val cleanup = if (started) {
+                    {
+                        try { am.setBluetoothScoOn(false) } catch (_: Exception) {}
+                        try { am.stopBluetoothSco() } catch (_: Exception) {}
+                        try { am.mode = prevMode } catch (_: Exception) {}
+                        try { am.setSpeakerphoneOn(prevSpeaker) } catch (_: Exception) {}
+                        updateTtsAudioAttributes(false)
+                    }
+                } else null
+                return AudioRoute(AudioManager.STREAM_VOICE_CALL, cleanup)
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            val a2dpOn = am.isBluetoothA2dpOn
+            if (a2dpOn) {
+                updateTtsAudioAttributes(false)
+                return AudioRoute(AudioManager.STREAM_MUSIC, null)
+            }
+            @Suppress("DEPRECATION")
+            val scoOn = am.isBluetoothScoOn
+            if (scoOn && am.isBluetoothScoAvailableOffCall) {
+                updateTtsAudioAttributes(true)
+                return AudioRoute(AudioManager.STREAM_VOICE_CALL, null)
+            }
+        }
+        updateTtsAudioAttributes(false)
+        return AudioRoute(AudioManager.STREAM_MUSIC, null)
+    }
+
+    private fun updateTtsAudioAttributes(useSco: Boolean) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) return
+        try {
+            val usage = if (useSco) AudioAttributes.USAGE_VOICE_COMMUNICATION else AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE
+            val stream = if (useSco) AudioManager.STREAM_VOICE_CALL else AudioManager.STREAM_MUSIC
+            val attrs = AudioAttributes.Builder()
+                .setUsage(usage)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                .setLegacyStreamType(stream)
+                .build()
+            tts?.setAudioAttributes(attrs)
+        } catch (_: Exception) {}
+    }
+
+    private data class AudioRoute(
+        val stream: Int,
+        val cleanup: (() -> Unit)?
+    )
 
     private fun sendOverlay(text: String) {
         try {
@@ -482,14 +590,14 @@ class AlertManager(private val context: Context) {
             zoneExitWarned = false
             val limit = zoneLimitKph
             val msg = if (limit != null) "Entering speed limit zone: limit is ${limit} km/h" else AppPrefs.getZoneEnter(context)
-            if (ttsReady && AppPrefs.isAudioEnabled(context)) { ensurePlaybackVolume(); speakWithFocus(msg) }
+            if (ttsReady && AppPrefs.isAudioEnabled(context)) speakWithFocus(msg)
             sendOverlay(msg)
         } else if (inZone && inside) {
             if (now - lastZoneRepeat >= AppPrefs.getZoneRepeatMs(context)) {
                 lastZoneRepeat = now
                 val limit = zoneLimitKph
                 val msg = if (limit != null) "Speed limit ${limit} km/h" else AppPrefs.getZoneEnter(context)
-                if (ttsReady && AppPrefs.isAudioEnabled(context)) { ensurePlaybackVolume(); speakWithFocus(msg) }
+                if (ttsReady && AppPrefs.isAudioEnabled(context)) speakWithFocus(msg)
                 sendOverlay(msg)
             }
             // Pre-warn exit if we have zone length and entry
@@ -520,7 +628,7 @@ class AlertManager(private val context: Context) {
                     val remaining = ahead.second
                     if (remaining in 1.0..200.0) {
                         val msg = "Exiting speed limit zone in ${nearestNice(remaining)}"
-                        if (ttsReady && AppPrefs.isAudioEnabled(context)) { ensurePlaybackVolume(); speakWithFocus(msg) }
+                        if (ttsReady && AppPrefs.isAudioEnabled(context)) speakWithFocus(msg)
                         sendOverlay(msg)
                         zoneExitWarned = true
                     }
@@ -529,7 +637,7 @@ class AlertManager(private val context: Context) {
         } else if (inZone && !inside) {
             inZone = false
             val msg = if (zoneLimitKph != null) "Exiting speed limit zone" else AppPrefs.getZoneExit(context)
-            if (ttsReady && AppPrefs.isAudioEnabled(context)) { ensurePlaybackVolume(); speakWithFocus(msg) }
+            if (ttsReady && AppPrefs.isAudioEnabled(context)) speakWithFocus(msg)
             sendOverlay(msg)
             zoneEntryLat = null; zoneEntryLng = null; zoneLength = null; zoneLimitKph = null; zoneExitWarned = false
         }
