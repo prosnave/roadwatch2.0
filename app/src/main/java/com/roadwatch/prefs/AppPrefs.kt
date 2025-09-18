@@ -34,6 +34,7 @@ object AppPrefs {
     private const val KEY_ACCOUNT_PASSWORD = "account_password"
     private const val KEY_LAST_HAZARD_DIRECTION = "last_hazard_direction"
     private const val KEY_LAST_HAZARD_AT = "last_hazard_at"
+    private const val KEY_DRIVE_MAP_ZOOM = "drive_map_zoom"
 
     fun setMutedForMinutes(context: Context, minutes: Int) {
         val until = System.currentTimeMillis() + minutes * 60_000L
@@ -282,4 +283,16 @@ object AppPrefs {
     fun getLastHazardDirectionAt(context: Context): Long =
         context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
             .getLong(KEY_LAST_HAZARD_AT, 0L)
+
+    fun setDriveMapZoom(context: Context, zoom: Float) {
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .edit()
+            .putFloat(KEY_DRIVE_MAP_ZOOM, zoom)
+            .apply()
+    }
+
+    fun getDriveMapZoom(context: Context): Float? {
+        val prefs = context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+        return if (prefs.contains(KEY_DRIVE_MAP_ZOOM)) prefs.getFloat(KEY_DRIVE_MAP_ZOOM, 0f) else null
+    }
 }

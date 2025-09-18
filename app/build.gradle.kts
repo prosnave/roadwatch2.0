@@ -39,8 +39,6 @@ android {
         // Restore MAPS_API_KEY placeholder
         manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
 
-        // Deterministic base name for all APKs
-        setProperty("archivesBaseName", "RoadWatch")
     }
 
     signingConfigs {

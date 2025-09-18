@@ -21,7 +21,19 @@
 
     <TextView android:id="@+id/txt_quick_actions" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="24dp" android:text="Quick actions" android:textStyle="bold" android:textColor="?attr/colorPrimary" android:visibility="gone" />
 
-    <com.google.android.material.button.MaterialButton android:id="@+id/btn_quick_opposite_lane" style="@style/Widget.MaterialComponents.Button.OutlinedButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:text="Mark opposite lane" android:textAllCaps="false" android:textColor="?attr/colorPrimary" android:visibility="gone" app:cornerRadius="24dp" app:strokeColor="?attr/colorPrimary" app:strokeWidth="1dp" />
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btn_quick_opposite_lane"
+        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:text="@string/mark_wrong_direction"
+        android:textAllCaps="false"
+        android:textColor="?attr/colorPrimary"
+        android:visibility="gone"
+        app:cornerRadius="24dp"
+        app:strokeColor="?attr/colorPrimary"
+        app:strokeWidth="1dp" />
 
     <com.google.android.material.button.MaterialButton android:id="@+id/btn_delete_hazard" style="@style/Widget.MaterialComponents.Button.TextButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp" android:text="Delete hazard" android:textAllCaps="false" android:textColor="@android:color/holo_red_dark" android:visibility="gone" app:cornerRadius="24dp" />
 

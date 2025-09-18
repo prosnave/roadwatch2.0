@@ -232,7 +232,7 @@ class AdminLocationsFragment : Fragment() {
         val activeCount = rows.count { it.active }
         val byType = rows.map { it.label.split("•")[0].trim() }.groupingBy { it }.eachCount()
         val typeLines = byType.entries.sortedBy { it.key }.joinToString("\n") { "- ${it.key}: ${it.value}" }
-        summaryBody?.text = "Total: ${total} (Active: ${activeCount})\n${typeLines}"
+        summaryBody.text = "Total: ${total} (Active: ${activeCount})\n${typeLines}"
         list.adapter = object : BaseAdapter() {
             override fun getCount() = rows.size
             override fun getItem(position: Int) = rows[position]
@@ -271,7 +271,7 @@ class AdminLocationsFragment : Fragment() {
                 return container
             }
         }
-        btnLoadMore?.isEnabled = serverCursor != null
+        btnLoadMore.isEnabled = serverCursor != null
     }
 
     private fun buildLabel(type: String, active: Boolean, votes: Int, created: String, directionality: String, heading: Float?, userBearing: Float?): String {
@@ -283,7 +283,7 @@ class AdminLocationsFragment : Fragment() {
         val niceDir = when (directionality.uppercase()) {
             "ONE_WAY" -> "One-way"
             "BIDIRECTIONAL" -> "Two-way"
-            "OPPOSITE" -> "Opposite"
+            "OPPOSITE" -> getString(com.roadwatch.app.R.string.mark_wrong_direction)
             else -> "Unknown"
         }
         val hdg = heading?.let { "${it.toInt()}°" } ?: "—"

@@ -1,6 +1,7 @@
 package com.roadwatch.feature.drive
 
 import android.os.Bundle
+import android.annotation.SuppressLint
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -39,7 +40,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.Locale
 import androidx.activity.result.contract.ActivityResultContracts
+import android.util.TypedValue
+import android.widget.LinearLayout
+import kotlin.math.abs
 
 class DriveHudFragment : Fragment() {
     private val ioScope = CoroutineScope(Dispatchers.IO)
@@ -56,6 +61,14 @@ class DriveHudFragment : Fragment() {
     private var providersReceiver: BroadcastReceiver? = null
     private var overlayReceiver: BroadcastReceiver? = null
     private var uiStateReceiver: BroadcastReceiver? = null
+    private var baseSpeedTextSizePx = 0f
+    private var baseBearingTextSizePx = 0f
+    private var baseLabelTextSizePx = 0f
+    private var baseSubtitleTextSizePx = 0f
+    private var baseCardPaddingHorizontalPx = 0
+    private var baseCardPaddingVerticalPx = 0
+    private var preferredZoom = DEFAULT_MAP_ZOOM
+    private var userAdjustingCamera = false
 
     private val requestPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
@@ -79,6 +92,7 @@ class DriveHudFragment : Fragment() {
             }
         }
 
+    @SuppressLint("MissingPermission")
     private val locListener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
             googleMap?.isMyLocationEnabled = hasFinePermission()
@@ -86,9 +100,14 @@ class DriveHudFragment : Fragment() {
             updateHudFrom(location)
             updateNextHazardChip(location)
             evaluateIdleStop(location)
+            val zoom = clampZoom(preferredZoom)
+            if (abs(zoom - preferredZoom) > 0.01f) {
+                preferredZoom = zoom
+                AppPrefs.setDriveMapZoom(requireContext(), zoom)
+            }
             val cameraPosition = com.google.android.gms.maps.model.CameraPosition.Builder()
                 .target(LatLng(location.latitude, location.longitude))
-                .zoom(17f)
+                .zoom(preferredZoom)
                 .bearing(location.bearing)
                 .tilt(45f)
                 .build()
@@ -124,6 +143,33 @@ class DriveHudFragment : Fragment() {
             gMap.uiSettings.isMyLocationButtonEnabled = false
             gMap.uiSettings.isCompassEnabled = true
             gMap.isTrafficEnabled = true
+
+            AppPrefs.getDriveMapZoom(requireContext())?.let {
+                val clamped = clampZoom(it)
+                preferredZoom = clamped
+                if (abs(clamped - it) > 0.01f) {
+                    AppPrefs.setDriveMapZoom(requireContext(), clamped)
+                }
+            }
+
+            gMap.setOnCameraMoveStartedListener { reason ->
+                if (reason == GoogleMap.OnCameraMoveStartedListener.REASON_GESTURE) {
+                    userAdjustingCamera = true
+                }
+            }
+            gMap.setOnCameraMoveCanceledListener {
+                userAdjustingCamera = false
+            }
+            gMap.setOnCameraIdleListener {
+                if (userAdjustingCamera) {
+                    val zoom = clampZoom(gMap.cameraPosition.zoom)
+                    if (abs(zoom - preferredZoom) > 0.01f) {
+                        preferredZoom = zoom
+                        AppPrefs.setDriveMapZoom(requireContext(), zoom)
+                    }
+                }
+                userAdjustingCamera = false
+            }
             // Night mode polish: apply dark map style when in night mode
             try {
                 val night = (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
@@ -136,7 +182,7 @@ class DriveHudFragment : Fragment() {
             // Center to last known location at a navigation-friendly zoom
             lastKnown()?.let { lk ->
                 gMap.moveCamera(
-                    CameraUpdateFactory.newLatLngZoom(LatLng(lk.latitude, lk.longitude), 17f)
+                    CameraUpdateFactory.newLatLngZoom(LatLng(lk.latitude, lk.longitude), preferredZoom)
                 )
             }
             // Ensure map controls avoid being obscured by HUD
@@ -163,6 +209,25 @@ class DriveHudFragment : Fragment() {
         val btnStop = view.findViewById<Button>(R.id.btn_stop)
         txtSpeed = view.findViewById(R.id.txt_speed_value)
         txtBearing = view.findViewById(R.id.txt_bearing_value)
+        if (baseSpeedTextSizePx == 0f) {
+            baseSpeedTextSizePx = txtSpeed?.textSize ?: 0f
+        }
+        if (baseBearingTextSizePx == 0f) {
+            baseBearingTextSizePx = txtBearing?.textSize ?: 0f
+        }
+        val speedLabel = view.findViewById<android.widget.TextView>(R.id.txt_speed_label)
+        val subtitleView = view.findViewById<android.widget.TextView>(R.id.txt_next_subtitle)
+        val speedCardContent = view.findViewById<LinearLayout>(R.id.speed_card_content)
+        if (baseLabelTextSizePx == 0f) {
+            baseLabelTextSizePx = speedLabel?.textSize ?: 0f
+        }
+        if (baseSubtitleTextSizePx == 0f) {
+            baseSubtitleTextSizePx = subtitleView?.textSize ?: 0f
+        }
+        if (baseCardPaddingHorizontalPx == 0 && speedCardContent != null) {
+            baseCardPaddingHorizontalPx = speedCardContent.paddingStart
+            baseCardPaddingVerticalPx = speedCardContent.paddingTop
+        }
 
         val btnReportBump = view.findViewById<com.google.android.material.button.MaterialButton>(R.id.btn_report_bump)
         val btnReportPothole = view.findViewById<com.google.android.material.button.MaterialButton>(R.id.btn_report_pothole)
@@ -213,6 +278,7 @@ class DriveHudFragment : Fragment() {
         ensureDndAccessPrompt()
     }
 
+    @SuppressLint("MissingPermission")
     private fun enableMyLocation() {
         if (!hasFinePermission()) {
             requestPermissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION))
@@ -226,6 +292,7 @@ class DriveHudFragment : Fragment() {
         return ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
     }
 
+    @SuppressLint("MissingPermission")
     private fun startLocationUpdates() {
         if (lm == null) lm = requireContext().getSystemService(android.content.Context.LOCATION_SERVICE) as LocationManager
         try {
@@ -319,6 +386,13 @@ class DriveHudFragment : Fragment() {
         private const val MIN_HEADING_AGREE_DEG = 15.0
         private const val ONE_WAY_MAX_HEADING_DEG = 10.0
         private const val MAX_LATERAL_OFFSET_METERS = 7.0
+        private const val WARN_DISTANCE_METERS = 75.0
+        private const val CAUTION_DISTANCE_METERS = 200.0
+        private const val PRIORITY_SUPERSEDE_DISTANCE_METERS = 80.0
+        private const val HAZARD_LINGER_METERS = 35.0
+        private const val MIN_MAP_ZOOM = 15.0f
+        private const val MAX_MAP_ZOOM = 20.0f
+        private const val DEFAULT_MAP_ZOOM = 18.5f
     }
 
     private fun vectorToBitmapDescriptor(resId: Int, scale: Float = 1.0f): BitmapDescriptor {
@@ -342,15 +416,19 @@ class DriveHudFragment : Fragment() {
     private fun dp(v: Int): Int = (resources.displayMetrics.density * v).toInt()
 
     private fun lastKnown(): android.location.Location? {
+        if (!hasFinePermission()) return null
         val lm = requireContext().getSystemService(android.content.Context.LOCATION_SERVICE) as android.location.LocationManager
         val providers = lm.getProviders(true)
         var best: android.location.Location? = null
         for (p in providers) {
+            @SuppressLint("MissingPermission")
             val l = lm.getLastKnownLocation(p) ?: continue
             if (best == null || l.accuracy < best.accuracy) best = l
         }
         return best
     }
+
+    private fun clampZoom(value: Float): Float = value.coerceIn(MIN_MAP_ZOOM, MAX_MAP_ZOOM)
 
     // Removed legacy quick picker dialog and GPS one-off fix helpers to keep code lean.
 
@@ -557,9 +635,8 @@ class DriveHudFragment : Fragment() {
         val lead = leadDistanceMeters(speedKph)
         val heading = Math.toRadians(location.bearing.toDouble())
 
-        var best: com.roadwatch.data.Hazard? = null
-        var bestAlong = Double.MAX_VALUE
-        var bestDist = Double.MAX_VALUE
+        val chipCandidates = mutableListOf<HazardCandidate>()
+        val styleCandidates = mutableListOf<HazardCandidate>()
 
         hazards.forEach { h ->
             val (tLat, tLng) = targetPoint(h)
@@ -572,29 +649,33 @@ class DriveHudFragment : Fragment() {
             val lateral = d * kotlin.math.sin(bTo - heading)
             if (kotlin.math.abs(lateral) > MAX_LATERAL_OFFSET_METERS) return@forEach
             val along = d * kotlin.math.cos(bTo - heading)
-            if (along <= 0.0) return@forEach
-            if (along < bestAlong) {
-                best = h
-                bestAlong = along
-                bestDist = d
+            if (along < -HAZARD_LINGER_METERS) return@forEach
+            val priority = hazardPriority(h.type)
+            val candidate = HazardCandidate(h, along, d, priority)
+            styleCandidates += candidate
+            if (along > 0.0) {
+                chipCandidates += candidate
             }
         }
 
-        if (best != null) {
-            val type = best!!.type.name.replace('_',' ').lowercase().replaceFirstChar { it.uppercase() }
-            val text = "$type in ${formatNiceDistance(bestAlong)}"
+        val bestAhead = selectBestCandidate(chipCandidates)
+        val bestStyle = bestAhead ?: selectBestCandidate(styleCandidates)
+
+        if (bestAhead != null) {
+            val type = bestAhead.hazard.type.name.replace('_',' ').lowercase().replaceFirstChar { it.uppercase() }
+            val text = "$type in ${formatNiceDistance(bestAhead.along)}"
             chipText.text = text
             chip.visibility = View.VISIBLE
-            subtitle?.text = "Next: ${type} • ${formatNiceDistance(bestDist)}"
-            updateSpeedCardStyle(bestAlong)
+            subtitle?.text = "Next: ${type} • ${formatNiceDistance(bestAhead.distance)}"
         } else {
             chip.visibility = View.GONE
             subtitle?.text = ""
-            updateSpeedCardStyle(null)
         }
+
+        updateSpeedCardStyle(bestStyle)
     }
 
-    private fun updateSpeedCardStyle(nextAlongMeters: Double?) {
+    private fun updateSpeedCardStyle(candidate: HazardCandidate?) {
         val card = view?.findViewById<com.google.android.material.card.MaterialCardView>(R.id.speed_card) ?: return
         val ctx = card.context
         val neutralBg = ContextCompat.getColor(ctx, R.color.surface)
@@ -603,34 +684,40 @@ class DriveHudFragment : Fragment() {
         val cautionBg = ContextCompat.getColor(ctx, R.color.primary_container)
         val cautionFg = ContextCompat.getColor(ctx, R.color.on_primary_container)
         val cautionStroke = ContextCompat.getColor(ctx, R.color.primary)
-        val warnBg = ContextCompat.getColor(ctx, R.color.alert_critical)
-        val warnFg = ContextCompat.getColor(ctx, R.color.on_surface)
+        val warnBg = ContextCompat.getColor(ctx, R.color.hazard_warn_background)
+        val warnFg = ContextCompat.getColor(ctx, R.color.hazard_warn_on_background)
+        val warnStroke = ContextCompat.getColor(ctx, R.color.hazard_warn_stroke)
 
-        var bg = neutralBg
-        var fg = neutralFg
-        var stroke = neutralStroke
-        var subtitleColor = ContextCompat.getColor(ctx, R.color.on_surface_variant)
+        val effectiveDistance = candidate?.effectiveAlong
+        val urgency = when {
+            effectiveDistance == null -> HazardUrgency.NEUTRAL
+            effectiveDistance <= WARN_DISTANCE_METERS -> HazardUrgency.WARN
+            effectiveDistance <= CAUTION_DISTANCE_METERS -> HazardUrgency.CAUTION
+            else -> HazardUrgency.NEUTRAL
+        }
 
-        if (nextAlongMeters != null) {
-            when {
-                nextAlongMeters <= 75.0 -> {
-                    bg = warnBg
-                    fg = warnFg
-                    stroke = warnBg
-                    subtitleColor = warnFg
-                }
-                nextAlongMeters <= 200.0 -> {
-                    bg = cautionBg
-                    fg = cautionFg
-                    stroke = cautionStroke
-                    subtitleColor = cautionFg
-                }
-                else -> {
-                    bg = neutralBg
-                    fg = neutralFg
-                    stroke = neutralStroke
-                    subtitleColor = ContextCompat.getColor(ctx, R.color.on_surface_variant)
-                }
+        val bg: Int
+        val fg: Int
+        val stroke: Int
+        val subtitleColor: Int
+        when (urgency) {
+            HazardUrgency.WARN -> {
+                bg = warnBg
+                fg = warnFg
+                stroke = warnStroke
+                subtitleColor = warnFg
+            }
+            HazardUrgency.CAUTION -> {
+                bg = cautionBg
+                fg = cautionFg
+                stroke = cautionStroke
+                subtitleColor = cautionFg
+            }
+            HazardUrgency.NEUTRAL -> {
+                bg = neutralBg
+                fg = neutralFg
+                stroke = neutralStroke
+                subtitleColor = ContextCompat.getColor(ctx, R.color.on_surface_variant)
             }
         }
 
@@ -648,6 +735,35 @@ class DriveHudFragment : Fragment() {
             view?.findViewById<android.widget.TextView>(R.id.txt_direction_label)
         )
         labels.forEach { it.setTextColor(fg) }
+
+        if (baseSpeedTextSizePx > 0f) {
+            txtSpeed?.setTextSize(TypedValue.COMPLEX_UNIT_PX, baseSpeedTextSizePx)
+        }
+        if (baseBearingTextSizePx > 0f) {
+            txtBearing?.setTextSize(TypedValue.COMPLEX_UNIT_PX, baseBearingTextSizePx)
+        }
+        val speedLabel = view?.findViewById<android.widget.TextView>(R.id.txt_speed_label)
+        val directionLabel = view?.findViewById<android.widget.TextView>(R.id.txt_direction_label)
+        if (baseLabelTextSizePx > 0f) {
+            speedLabel?.setTextSize(TypedValue.COMPLEX_UNIT_PX, baseLabelTextSizePx)
+            directionLabel?.setTextSize(TypedValue.COMPLEX_UNIT_PX, baseLabelTextSizePx)
+        }
+        if (baseSubtitleTextSizePx > 0f) {
+            subtitle?.setTextSize(TypedValue.COMPLEX_UNIT_PX, baseSubtitleTextSizePx)
+        }
+        val content = view?.findViewById<LinearLayout>(R.id.speed_card_content)
+        if (content != null && baseCardPaddingHorizontalPx > 0) {
+            content.setPadding(
+                baseCardPaddingHorizontalPx,
+                baseCardPaddingVerticalPx,
+                baseCardPaddingHorizontalPx,
+                baseCardPaddingVerticalPx
+            )
+        }
+
+        card.animate().cancel()
+        card.scaleX = 1f
+        card.scaleY = 1f
     }
 
     private fun targetPoint(h: com.roadwatch.data.Hazard): Pair<Double, Double> {
@@ -711,7 +827,14 @@ class DriveHudFragment : Fragment() {
                 map.clear()
                 if (hazards.isNotEmpty()) {
                     val first = LatLng(hazards.first().lat, hazards.first().lng)
-                    if (firstFix) map.moveCamera(CameraUpdateFactory.newLatLngZoom(first, 12f))
+                    if (firstFix) {
+                        val zoom = clampZoom(preferredZoom)
+                        if (abs(zoom - preferredZoom) > 0.01f) {
+                            preferredZoom = zoom
+                            AppPrefs.setDriveMapZoom(requireContext(), zoom)
+                        }
+                        map.moveCamera(CameraUpdateFactory.newLatLngZoom(first, preferredZoom))
+                    }
                 }
                 hazards.take(500).forEach { h ->
                     val iconRes = when (h.type) {
@@ -935,17 +1058,26 @@ class DriveHudFragment : Fragment() {
                     else -> u.hazard.reportedHeadingDeg
                 }
                 val opposite = normalizeBearing(baseHeading + 180f)
+                val newDirectionality = when (u.hazard.directionality.uppercase(Locale.US)) {
+                    "BIDIRECTIONAL" -> "ONE_WAY"
+                    "ONE_WAY" -> "ONE_WAY"
+                    else -> "ONE_WAY"
+                }
                 val updated = u.hazard.copy(
-                    directionality = "OPPOSITE",
+                    directionality = newDirectionality,
                     reportedHeadingDeg = opposite,
                     userBearing = opposite,
                 )
                 val originalKey = com.roadwatch.data.SeedOverrides.keyOf(u.hazard)
                 if (store.upsertByKey(originalKey, updated)) {
+                    val updatedUser = u.copy(hazard = updated)
                     notifyRefresh()
                     refreshMarkers()
-                    com.roadwatch.ui.UiAlerts.success(view, "Marked for opposite lane")
                     dialog.dismiss()
+                    startMovePin(
+                        updatedUser,
+                        ctx.getString(com.roadwatch.app.R.string.move_pin_opposite_prompt)
+                    )
                 } else {
                     com.roadwatch.ui.UiAlerts.error(view, "Update failed")
                 }
@@ -975,9 +1107,10 @@ class DriveHudFragment : Fragment() {
 
     private var pendingMove: com.roadwatch.data.UserHazard? = null
     private var pendingServerMoveId: String? = null
-    private fun startMovePin(u: com.roadwatch.data.UserHazard) {
+    private fun startMovePin(u: com.roadwatch.data.UserHazard, message: String? = null) {
         pendingMove = u
-        com.roadwatch.ui.UiAlerts.info(view, "Tap map to set new location for this hazard.")
+        val prompt = message ?: getString(com.roadwatch.app.R.string.tap_map_set_location)
+        com.roadwatch.ui.UiAlerts.info(view, prompt)
         googleMap?.setOnMapClickListener { latLng ->
             finalizeMovePin(latLng)
         }
@@ -1011,6 +1144,37 @@ class DriveHudFragment : Fragment() {
         pendingServerMoveId = null
         if (r.isSuccess) com.roadwatch.ui.UiAlerts.success(view, "Location updated") else com.roadwatch.ui.UiAlerts.error(view, "Update failed")
     }
+
+    private fun selectBestCandidate(candidates: List<HazardCandidate>): HazardCandidate? {
+        if (candidates.isEmpty()) return null
+        val nearest = candidates.minOf { it.effectiveAlong }
+        val window = candidates.filter { it.effectiveAlong - nearest <= PRIORITY_SUPERSEDE_DISTANCE_METERS }
+        if (window.isEmpty()) return null
+        val bestPriority = window.minOf { it.priority }
+        return window.filter { it.priority == bestPriority }
+            .minByOrNull { it.effectiveAlong }
+    }
+
+    private data class HazardCandidate(
+        val hazard: com.roadwatch.data.Hazard,
+        val along: Double,
+        val distance: Double,
+        val priority: Int,
+    ) {
+        val effectiveAlong: Double
+            get() = if (along > 0.0) along else 0.0
+    }
+
+    private fun hazardPriority(type: HazardType): Int = when (type) {
+        HazardType.SPEED_BUMP -> 0
+        HazardType.SPEED_LIMIT_ZONE -> 1
+        HazardType.POTHOLE -> 1
+        HazardType.RUMBLE_STRIP -> 2
+    }
+
+    private enum class HazardUrgency { NEUTRAL, CAUTION, WARN }
+
+    private fun Double.format(digits: Int = 6): String = String.format(Locale.US, "%.${digits}f", this)
 
     private fun notifyRefresh() {
         try {

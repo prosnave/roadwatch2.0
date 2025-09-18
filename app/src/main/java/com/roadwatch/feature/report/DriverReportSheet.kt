@@ -379,7 +379,7 @@ class DriverReportSheet : BottomSheetDialogFragment() {
         return when (direction?.uppercase()) {
             "ONE_WAY" -> "One-way"
             "BIDIRECTIONAL" -> "Two-way"
-            "OPPOSITE" -> "Opposite lane"
+            "OPPOSITE" -> getString(com.roadwatch.app.R.string.mark_wrong_direction)
             else -> "Unknown"
         }
     }

@@ -2,6 +2,9 @@ package com.roadwatch.network
 
 import org.json.JSONObject
 
+private fun JSONObject.optNullableString(name: String): String? =
+    if (isNull(name)) null else optString(name, "").takeIf { it.isNotEmpty() }
+
 enum class HazardTypeDto { SPEED_BUMP, POTHOLE, RUMBLE_STRIP, SPEED_LIMIT_ZONE }
 
 data class HazardDto(
@@ -41,7 +44,7 @@ fun JSONObject.toHazardDto(): HazardDto = HazardDto(
     source = getString("source"),
     created_at = getString("created_at"),
     updated_at = getString("updated_at"),
-    created_by_device_id = optString("created_by_device_id", null),
+    created_by_device_id = optNullableString("created_by_device_id"),
     speed_limit_kph = if (isNull("speed_limit_kph")) null else getInt("speed_limit_kph"),
     zone_length_meters = if (isNull("zone_length_meters")) null else getInt("zone_length_meters"),
     zone_start_lat = if (isNull("zone_start_lat")) null else getDouble("zone_start_lat"),
@@ -50,4 +53,3 @@ fun JSONObject.toHazardDto(): HazardDto = HazardDto(
     zone_end_lng = if (isNull("zone_end_lng")) null else getDouble("zone_end_lng"),
     votes_count = getInt("votes_count")
 )
-

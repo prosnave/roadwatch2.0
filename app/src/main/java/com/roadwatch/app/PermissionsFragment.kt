@@ -16,7 +16,7 @@ class PermissionsFragment : Fragment() {
     private lateinit var status: TextView
 
     private val requestPermissionLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { _ ->
             requestNext()
         }
 

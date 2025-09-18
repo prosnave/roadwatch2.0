@@ -113,10 +113,12 @@ class HomeFragment : Fragment() {
                 val lastLng = com.roadwatch.prefs.AppPrefs.getLastAutoStopLng(requireContext())
                 val lastAt = com.roadwatch.prefs.AppPrefs.getLastAutoStopAt(requireContext())
                 if (lastLat != null && lastLng != null && lastAt != null && System.currentTimeMillis() - lastAt < 2 * 60 * 60 * 1000) {
+                    if (!hasFinePermission()) return@post
                     val lm = requireContext().getSystemService(android.content.Context.LOCATION_SERVICE) as LocationManager
                     val providers = lm.getProviders(true)
                     var best: android.location.Location? = null
                     for (p in providers) {
+                        @android.annotation.SuppressLint("MissingPermission")
                         val l = lm.getLastKnownLocation(p) ?: continue
                         if (best == null || l.accuracy < best.accuracy) best = l
                     }
@@ -150,8 +152,12 @@ class HomeFragment : Fragment() {
         return R * c
     }
 
+    private fun hasFinePermission(): Boolean {
+        return ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+    }
+
     private fun ensureLocationEnabled(onReady: () -> Unit) {
-        val granted = ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val granted = hasFinePermission()
         if (!granted) {
             pendingLocCallback = onReady
             requestPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)

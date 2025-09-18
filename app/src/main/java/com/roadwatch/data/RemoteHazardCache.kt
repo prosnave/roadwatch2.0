@@ -7,6 +7,9 @@ import com.roadwatch.network.ApiClient
 import java.time.Instant
 import kotlin.math.*
 
+private fun org.json.JSONObject.optNullableString(name: String): String? =
+    if (isNull(name)) null else optString(name, "").takeIf { it.isNotEmpty() }
+
 class RemoteHazardCache(private val context: Context) {
     private var lastFetchMs: Long = 0L
     private var lastLat: Double? = null
@@ -23,14 +26,14 @@ class RemoteHazardCache(private val context: Context) {
                 for (i in 0 until arr.length()) {
                     val h = arr.getJSONObject(i)
                     list += Hazard(
-                        id = h.optString("id", null),
+                        id = h.optNullableString("id"),
                         type = HazardType.valueOf(h.getString("type")),
                         lat = h.getDouble("lat"),
                         lng = h.getDouble("lng"),
                         directionality = h.getString("directionality"),
                         reportedHeadingDeg = h.optDouble("reported_heading_deg", 0.0).toFloat(),
                         active = h.getBoolean("active"),
-                        source = h.getString("source"),
+                        source = h.optNullableString("source") ?: "REMOTE_SYNC",
                         createdAt = try { Instant.parse(h.getString("created_at")) } catch (_: Exception) { Instant.EPOCH },
                         speedLimitKph = if (h.isNull("speed_limit_kph")) null else h.getInt("speed_limit_kph"),
                         zoneLengthMeters = if (h.isNull("zone_length_meters")) null else h.getInt("zone_length_meters"),

@@ -72,6 +72,14 @@ if [[ ! -x ./gradlew ]]; then
   exit 1
 fi
 
+# Force Gradle wrapper caches into the workspace so sandboxed builds succeed
+if [[ -z "${GRADLE_USER_HOME:-}" || "${GRADLE_USER_HOME}" == "$HOME/.gradle" ]]; then
+  export GRADLE_USER_HOME="$PWD/.gradle"
+fi
+mkdir -p "$GRADLE_USER_HOME"
+
+export GRADLE_OPTS="${GRADLE_OPTS:-} -Dorg.gradle.daemon=false"
+
 # Ensure a usable Java 17 is available (particularly for non-login shells)
 if [[ -z "${JAVA_HOME:-}" ]]; then
   if command -v /usr/libexec/java_home >/dev/null 2>&1; then
@@ -94,14 +102,15 @@ if [[ "$SERVE_ONLY" -eq 0 ]]; then
   OUT_DIR="releases/${TIMESTAMP}"
   mkdir -p "$OUT_DIR"
   echo "=== Building APKs (${BUILD_TYPE_LC}) ==="
+  GRADLEW=(./gradlew --no-daemon)
   if [[ "$CLEAN_BUILD" -eq 1 ]]; then
     echo "=== Cleaning build directory ==="
-    ./gradlew clean
+    "${GRADLEW[@]}" clean
   fi
   if [[ "$BUILD_TYPE_LC" == "debug" ]]; then
-    ./gradlew assemblePublicDebug assembleAdminDebug
+    "${GRADLEW[@]}" assemblePublicDebug assembleAdminDebug
   else
-    ./gradlew assemblePublicRelease assembleAdminRelease
+    "${GRADLEW[@]}" assemblePublicRelease assembleAdminRelease
   fi
 
   echo "=== Collecting artifacts ==="
