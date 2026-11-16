@@ -3,139 +3,153 @@ package com.roadwatch.data
 import android.content.Context
 import android.util.Log
 import java.io.File
-import java.time.Instant
-import java.time.format.DateTimeFormatter
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.util.concurrent.CopyOnWriteArrayList
 
-class HazardStore(private val context: Context) {
-    private val tag = "HazardStore"
-    private val file: File by lazy { File(context.filesDir, "user_hazards.csv") }
+/**
+ * Persistent hazard store (single CSV in app-private storage, format unchanged from v1 so existing
+ * installs keep their field data). All access goes through one in-memory copy per process, so
+ *  - reads are free (the alert engine used to re-parse CSV files on every GPS fix),
+ *  - writes are serialised and atomic (temp file + rename; a crash can't truncate the dataset),
+ *  - ids are unique and stable, and listeners hear about every change.
+ */
+class HazardStore(context: Context) {
+    private val shared = Shared.forFile(File(context.applicationContext.filesDir, FILE_NAME))
 
-    init {
-        if (!file.exists()) {
+    fun list(): MutableList<UserHazard> = shared.snapshot().toMutableList()
+
+    fun add(h: Hazard): Boolean = addReturning(h) != null
+
+    fun addReturning(h: Hazard): UserHazard? = shared.mutate { items ->
+        val u = UserHazard(shared.nextId(), h)
+        items += u
+        u
+    }
+
+    fun delete(id: String): Boolean = shared.mutate { items -> items.removeAll { it.id == id } } == true
+
+    /** Puts back a previously deleted hazard with its original id (Undo). */
+    fun restore(u: UserHazard): Boolean = shared.mutate { items ->
+        if (items.none { it.id == u.id }) items += u
+        true
+    } == true
+
+    fun toggleActive(id: String): Boolean = update(id) { it.copy(active = !it.active) }
+
+    fun update(id: String, change: (Hazard) -> Hazard): Boolean = shared.mutate { items ->
+        val i = items.indexOfFirst { it.id == id }
+        if (i < 0) false else {
+            items[i] = items[i].copy(hazard = change(items[i].hazard))
+            true
+        }
+    } == true
+
+    fun upsertByKey(key: String, hazard: Hazard): Boolean = shared.mutate { items ->
+        val i = items.indexOfFirst { SeedOverrides.keyOf(it.hazard) == key }
+        if (i >= 0) items[i] = items[i].copy(hazard = hazard) else items += UserHazard(shared.nextId(), hazard)
+        true
+    } == true
+
+    /** Replace the whole dataset (import / reset). Ids are kept when unique, regenerated otherwise. */
+    fun replaceAll(newItems: List<UserHazard>): Boolean = shared.mutate { items ->
+        items.clear()
+        val seen = HashSet<String>()
+        newItems.forEach { u ->
+            val id = if (u.id.isBlank() || !seen.add(u.id)) shared.nextId().also { seen.add(it) } else u.id
+            items += u.copy(id = id)
+        }
+        true
+    } == true
+
+    fun count(): Int = shared.snapshot().size
+
+    fun file(): File = shared.file
+
+    companion object {
+        private const val TAG = "HazardStore"
+        const val FILE_NAME = "user_hazards.csv"
+
+        private val listeners = CopyOnWriteArrayList<() -> Unit>()
+
+        /** Called on any thread after every successful change. */
+        fun addListener(l: () -> Unit) { listeners.addIfAbsent(l) }
+        fun removeListener(l: () -> Unit) { listeners.remove(l) }
+        internal fun notifyChanged() { listeners.forEach { runCatching(it) } }
+    }
+
+    private class Shared(val file: File) {
+        private val lock = Any()
+        private var items: MutableList<UserHazard>? = null
+        private var lastId = 0L
+
+        fun snapshot(): List<UserHazard> = synchronized(lock) { loaded().map { it.withId() } }
+
+        private fun UserHazard.withId() = copy(hazard = hazard.copy(id = id))
+
+        fun nextId(): String = synchronized(lock) {
+            lastId = maxOf(System.currentTimeMillis(), lastId + 1)
+            lastId.toString()
+        }
+
+        /** Runs [block] on the live list under the lock; persists and notifies if it reports success. */
+        fun <T> mutate(block: (MutableList<UserHazard>) -> T): T? {
+            val result: T
+            synchronized(lock) {
+                val list = loaded()
+                val before = list.toList()
+                result = block(list)
+                if (list != before) {
+                    if (!persist(list)) {
+                        items = before.toMutableList()
+                        return null
+                    }
+                }
+            }
+            notifyChanged()
+            return result
+        }
+
+        private fun loaded(): MutableList<UserHazard> {
+            items?.let { return it }
+            val parsed = try {
+                if (file.exists()) HazardCsv.parse(file.readLines().asSequence()) else emptyList()
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to read hazards; starting empty (file kept)", e)
+                emptyList()
+            }
+            val seen = HashSet<String>()
+            val fixed = parsed.map { u ->
+                if (u.id.isBlank() || !seen.add(u.id)) {
+                    val id = nextIdUnlocked()
+                    seen.add(id)
+                    u.copy(id = id)
+                } else u
+            }.toMutableList()
+            lastId = maxOf(lastId, fixed.maxOfOrNull { it.id.toLongOrNull() ?: 0L } ?: 0L)
+            items = fixed
+            return fixed
+        }
+
+        private fun nextIdUnlocked(): String {
+            lastId = maxOf(System.currentTimeMillis(), lastId + 1)
+            return lastId.toString()
+        }
+
+        private fun persist(list: List<UserHazard>): Boolean = try {
             file.parentFile?.mkdirs()
-            file.writeText("id,type,lat,lng,active,directionality,reportedHeadingDeg,source,createdAt,speedLimitKph,zoneLengthMeters,zoneStartLat,zoneStartLng,zoneEndLat,zoneEndLng,userBearing\n")
-        }
-    }
-
-    fun add(h: Hazard): Boolean {
-        return try {
-            val id = System.currentTimeMillis().toString()
-            val createdAt = DateTimeFormatter.ISO_INSTANT.format(h.createdAt)
-            val line = listOf(
-                id,
-                h.type.name,
-                h.lat.toString(),
-                h.lng.toString(),
-                h.active.toString(),
-                h.directionality,
-                h.reportedHeadingDeg.toString(),
-                h.source,
-                createdAt,
-                h.speedLimitKph?.toString().orEmpty(),
-                h.zoneLengthMeters?.toString().orEmpty(),
-                h.zoneStartLat?.toString().orEmpty(),
-                h.zoneStartLng?.toString().orEmpty(),
-                h.zoneEndLat?.toString().orEmpty(),
-                h.zoneEndLng?.toString().orEmpty(),
-                h.userBearing?.toString().orEmpty()
-            ).joinToString(",")
-            file.appendText(line + "\n")
+            val tmp = File(file.parentFile, "$FILE_NAME.tmp")
+            tmp.writeText(HazardCsv.formatAll(list))
+            Files.move(tmp.toPath(), file.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
             true
         } catch (e: Exception) {
-            Log.e(tag, "Failed to write user hazard", e)
+            Log.e(TAG, "Failed to persist hazards", e)
             false
         }
-    }
 
-    fun list(): MutableList<UserHazard> {
-        val result = mutableListOf<UserHazard>()
-        if (!file.exists()) return result
-        file.forEachLine { raw ->
-            if (raw.startsWith("id,")) return@forEachLine
-            val parts = raw.split(',')
-            if (parts.size < 9) return@forEachLine
-            try {
-                result += UserHazard(
-                    id = parts[0],
-                    hazard = Hazard(
-                        type = HazardType.valueOf(parts[1]),
-                        lat = parts[2].toDouble(),
-                        lng = parts[3].toDouble(),
-                        active = parts[4].toBooleanStrictOrNull() ?: true,
-                        directionality = parts[5],
-                        reportedHeadingDeg = parts.getOrNull(6)?.toFloatOrNull() ?: 0.0f,
-                        source = parts[7],
-                        createdAt = Instant.parse(parts[8]),
-                        speedLimitKph = parts.getOrNull(9)?.toIntOrNull(),
-                        zoneLengthMeters = parts.getOrNull(10)?.toIntOrNull(),
-                        zoneStartLat = parts.getOrNull(11)?.toDoubleOrNull(),
-                        zoneStartLng = parts.getOrNull(12)?.toDoubleOrNull(),
-                        zoneEndLat = parts.getOrNull(13)?.toDoubleOrNull(),
-                        zoneEndLng = parts.getOrNull(14)?.toDoubleOrNull(),
-                        userBearing = parts.getOrNull(15)?.toFloatOrNull(),
-                    )
-                )
-            } catch (_: Exception) {
-            }
-        }
-        return result
-    }
-
-    fun delete(id: String): Boolean {
-        if (!file.exists()) return false
-        val remaining = list().filter { it.id != id }
-        return writeAll(remaining)
-    }
-
-    fun toggleActive(id: String): Boolean {
-        val items = list()
-        val updated = items.map { u ->
-            if (u.id == id) u.copy(hazard = u.hazard.copy(active = !u.hazard.active)) else u
-        }
-        return writeAll(updated)
-    }
-
-    fun upsertByKey(key: String, hazard: Hazard): Boolean {
-        val items = list().toMutableList()
-        val idx = items.indexOfFirst { SeedOverrides.keyOf(it.hazard) == key }
-        return if (idx >= 0) {
-            items[idx] = items[idx].copy(hazard = hazard)
-            writeAll(items)
-        } else {
-            add(hazard)
-        }
-    }
-
-    private fun writeAll(items: List<UserHazard>): Boolean {
-        return try {
-            file.writeText("id,type,lat,lng,active,directionality,reportedHeadingDeg,source,createdAt,speedLimitKph,zoneLengthMeters,zoneStartLat,zoneStartLng,zoneEndLat,zoneEndLng,userBearing\n")
-            items.forEach { u ->
-                val h = u.hazard
-                val createdAt = DateTimeFormatter.ISO_INSTANT.format(h.createdAt)
-                val line = listOf(
-                    u.id,
-                    h.type.name,
-                    h.lat.toString(),
-                    h.lng.toString(),
-                    h.active.toString(),
-                    h.directionality,
-                    h.reportedHeadingDeg.toString(),
-                    h.source,
-                    createdAt,
-                    h.speedLimitKph?.toString().orEmpty(),
-                    h.zoneLengthMeters?.toString().orEmpty(),
-                    h.zoneStartLat?.toString().orEmpty(),
-                h.zoneStartLng?.toString().orEmpty(),
-                h.zoneEndLat?.toString().orEmpty(),
-                h.zoneEndLng?.toString().orEmpty(),
-                h.userBearing?.toString().orEmpty()
-            ).joinToString(",")
-                file.appendText(line + "\n")
-            }
-            true
-        } catch (e: Exception) {
-            Log.e(tag, "Failed to rewrite hazards", e)
-            false
+        companion object {
+            private val registry = HashMap<String, Shared>()
+            fun forFile(f: File): Shared = synchronized(registry) { registry.getOrPut(f.absolutePath) { Shared(f) } }
         }
     }
 }

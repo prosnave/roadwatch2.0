@@ -138,3 +138,8 @@ local.properties
 
 # Exclude app build directories
 app/build/
+
+# Field-test APK output and signing material
+dist/
+*.keystore
+*.jks

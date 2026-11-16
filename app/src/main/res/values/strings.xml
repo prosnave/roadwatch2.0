@@ -1,5 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="drive_live">ROADWATCH / LIVE DRIVE</string>
+    <string name="travel_heading">Heading</string>
+    <string name="report_scope_title">Report a hazard</string>
+    <string name="report_scope_one">Next report: your direction only. Use this on divided roads.</string>
+    <string name="report_scope_both">Next report: both travel directions. Only use if the same hazard affects both.</string>
+    <string name="scope_this">This direction</string>
+    <string name="scope_both">Both directions</string>
+    <string name="end_drive">End drive</string>
+    <string name="mute_alerts_short">Mute alerts</string>
+    <string name="wrong_alert">Wrong alert?</string>
+    <string name="brand_tagline">Know what\'s ahead.</string>
+    <string name="brand_description">Road awareness, built around your journey.\nLocal data. No account required.</string>
+    <string name="field_safety_note">Driver: keep your eyes on the road. Ask a passenger to report and use field tools only when parked. Alerts are assistance, not a guarantee.</string>
+    <string name="heading_review">Saved heading: %1$s. Direction is hazard applicability, not the road\'s legal one-way status.</string>
+    <string name="heading_repair">Use current travel heading (when parked)</string>
     <string name="drive_mode_active">Drive Mode Active</string>
     <string name="ready">Ready</string>
     <string name="monitoring_hazards">Monitoring hazards ahead...</string>

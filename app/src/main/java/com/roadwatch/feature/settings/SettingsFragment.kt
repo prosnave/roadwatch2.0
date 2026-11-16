@@ -1,659 +1,217 @@
 package com.roadwatch.feature.settings
 
-import android.Manifest
 import android.app.AlertDialog
-import android.content.pm.PackageManager
+import android.content.Context
+import android.content.Intent
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
 import android.widget.Button
-import android.widget.ProgressBar
-import android.widget.ScrollView
+import android.widget.EditText
+import android.widget.Spinner
 import android.widget.TextView
-import androidx.fragment.app.Fragment
+import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.widget.SwitchCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.fragment.app.Fragment
 import com.roadwatch.app.BuildConfig
 import com.roadwatch.app.R
+import com.roadwatch.data.HazardStore
+import com.roadwatch.data.HazardTransfer
 import com.roadwatch.data.SeedRepository
-import com.roadwatch.notifications.NotificationHelper
-import android.speech.tts.TextToSpeech
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import java.io.File
-import java.util.Locale
-import java.util.concurrent.CountDownLatch
+import com.roadwatch.feature.admin.AdminLocationsFragment
+import com.roadwatch.prefs.AppPrefs
+import java.util.concurrent.Executors
 
 class SettingsFragment : Fragment() {
-    private val ioScope = CoroutineScope(Dispatchers.IO)
-    private var tts: TextToSpeech? = null
-    private var ttsReady: Boolean = false
+    private val io = Executors.newSingleThreadExecutor()
 
-    private var pendingPermissionCallback: ((Boolean) -> Unit)? = null
-    private var pendingBgCallback: ((Boolean) -> Unit)? = null
-
-    private val requestPermissionLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
-            pendingPermissionCallback?.invoke(isGranted)
-            pendingPermissionCallback = null
-        }
-
-    private val requestBgPermissionLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
-            pendingBgCallback?.invoke(isGranted)
-            pendingBgCallback = null
-        }
-
-    // File picker for CSV imports
     private val importCsvLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
-        if (uri != null) {
-            ioScope.launch { importFromUri(uri) }
-        }
+        if (uri != null) importFrom(uri)
     }
 
-    override fun onCreateView(
-        inflater: LayoutInflater,
-        container: ViewGroup?,
-        savedInstanceState: Bundle?
-    ): View {
-        return inflater.inflate(R.layout.fragment_settings, container, false)
-    }
+    override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View =
+        inflater.inflate(R.layout.fragment_settings, container, false)
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-
-        val status = view.findViewById<TextView>(R.id.txt_status)
-        val btnReload = view.findViewById<Button>(R.id.btn_reload)
-        val btnTestAlert = view.findViewById<Button>(R.id.btn_test_alert)
-        val btnExport = view.findViewById<Button>(R.id.btn_export)
-        val btnImport = view.findViewById<Button>(R.id.btn_import)
-        val btnAdmin = view.findViewById<Button>(R.id.btn_admin)
-        val btnReset = view.findViewById<Button>(R.id.btn_reset_data)
-        val btnShare = view.findViewById<Button>(R.id.btn_share_export)
-        val switchBg = view.findViewById<android.widget.Switch>(R.id.switch_bg_alerts)
-        val switchHaptics = view.findViewById<android.widget.Switch>(R.id.switch_haptics)
-        val spnFocus = view.findViewById<android.widget.Spinner>(R.id.spn_audio_focus)
-        val switchAutoResume = view.findViewById<android.widget.Switch>(R.id.switch_auto_resume)
-        val spnCurve = view.findViewById<android.widget.Spinner>(R.id.spn_speed_curve)
-        val edtZoneEnter = view.findViewById<android.widget.EditText>(R.id.edt_zone_enter)
-        val edtZoneExit = view.findViewById<android.widget.EditText>(R.id.edt_zone_exit)
-        val edtZoneRepeat = view.findViewById<android.widget.EditText>(R.id.edt_zone_repeat)
-        val btnZoneSave = view.findViewById<Button>(R.id.btn_zone_save)
-        val switchCluster = view.findViewById<android.widget.Switch>(R.id.switch_cluster_enabled)
-        val edtClusterSpeed = view.findViewById<android.widget.EditText>(R.id.edt_cluster_speed)
-
-        // Admin/Public: show button with different label
-        val isAdmin = BuildConfig.IS_ADMIN
-        btnAdmin.text = if (isAdmin) "Manage Locations" else "View Locations"
-        btnExport.visibility = if (isAdmin) View.VISIBLE else View.GONE
-        btnImport.visibility = if (isAdmin) View.VISIBLE else View.GONE
-        btnShare.visibility = if (isAdmin) View.VISIBLE else View.GONE
-        btnReset.visibility = if (isAdmin) View.VISIBLE else View.GONE
-
-        fun refreshDataButtons() {
-            ioScope.launch {
-                val repo = SeedRepository(requireContext())
-                val (seedResult, seeds) = repo.loadSeeds()
-                val users = repo.loadUserHazards()
-                val seedsCount = seeds.size
-                val userCount = users.size
-                requireActivity().runOnUiThread {
-                    btnReload.visibility = if (isAdmin && seedsCount > 0) View.VISIBLE else View.GONE
-                    val anyData = (seedsCount + userCount) > 0
-                    btnExport.visibility = if (isAdmin && anyData) View.VISIBLE else View.GONE
-                    btnShare.visibility = if (isAdmin && anyData) View.VISIBLE else View.GONE
-                    // Hide Manage/View Locations when no data at all
-                    btnAdmin.visibility = if (anyData) View.VISIBLE else View.GONE
-                }
-            }
-        }
-
-        // Initialize data-driven visibilities
-        refreshDataButtons()
-
-        btnReload.setOnClickListener {
-            android.app.AlertDialog.Builder(requireContext())
-                .setTitle("Reload Seed Hazards")
-                .setMessage("This will reload seed hazards. User-added hazards are kept.")
-                .setPositiveButton("Continue") { _, _ ->
-                    ioScope.launch {
-                        val repo = SeedRepository(requireContext())
-                        repo.loadSeeds()
-                        requireActivity().runOnUiThread {
-                            status.text = "Seeds reloaded"
-                            refreshDataButtons()
-                        }
-                    }
-                }
-                .setNegativeButton("Cancel", null)
-                .show()
-        }
-
-        btnTestAlert.setOnClickListener {
-            ensureTts()
-            if (ttsReady) {
-                tts?.speak("RoadWatch test alert: hazard ahead", TextToSpeech.QUEUE_FLUSH, null, "rw_test")
-            }
-            com.roadwatch.ui.UiAlerts.info(view, "Test alert: hazard ahead")
-            status.text = getString(R.string.test_alert)
-        }
-
-        btnReset.setOnClickListener {
-            android.app.AlertDialog.Builder(requireContext())
-                .setTitle("Reset Local Data")
-                .setMessage("This will delete local user hazards, clear seed overrides and votes. Seed data stays.")
-                .setPositiveButton("Reset") { _, _ ->
-                    ioScope.launch {
-                        // Delete user hazards CSV
-                        try {
-                            val f = java.io.File(requireContext().filesDir, "user_hazards.csv")
-                            if (f.exists()) f.delete()
-                        } catch (_: Exception) {}
-                        // Clear overrides and votes
-                        try { requireContext().getSharedPreferences("seed_overrides", android.content.Context.MODE_PRIVATE).edit().clear().apply() } catch (_: Exception) {}
-                        try { requireContext().getSharedPreferences("community_votes", android.content.Context.MODE_PRIVATE).edit().clear().apply() } catch (_: Exception) {}
-                        requireActivity().runOnUiThread {
-                            status.text = "Local data reset."
-                            android.widget.Toast.makeText(requireContext(), "Local data reset", android.widget.Toast.LENGTH_SHORT).show()
-                            refreshDataButtons()
-                        }
-                    }
-                }
-                .setNegativeButton("Cancel", null)
-                .show()
-        }
-
-        // Removed duplicate clear-all button; Reset Local Data covers local cleanup.
-
-        btnExport.setOnClickListener {
-            ioScope.launch {
-                val repo = SeedRepository(requireContext())
-                val (seedLoad, seeds) = repo.loadSeeds()
-                val users = repo.loadUserHazards()
-                val exportDir = File(requireContext().filesDir, "exports").apply { mkdirs() }
-                val out = File(exportDir, "hazards_export.csv")
-                out.bufferedWriter().use { w ->
-                    val header = listOf(
-                        "type",
-                        "lat",
-                        "lng",
-                        "source",
-                        "active",
-                        "directionality",
-                        "reportedHeadingDeg",
-                        "userBearing",
-                        "createdAt",
-                        "updatedAt",
-                        "speedLimitKph",
-                        "zoneLengthMeters",
-                        "zoneStartLat",
-                        "zoneStartLng",
-                        "zoneEndLat",
-                        "zoneEndLng",
-                        "id",
-                        "votes",
-                        "votesCount"
-                    ).joinToString(",")
-                    w.appendLine(header)
-
-                    fun com.roadwatch.data.Hazard.optionalField(name: String): Any? = try {
-                        val field = this::class.java.getDeclaredField(name)
-                        field.isAccessible = true
-                        field.get(this)
-                    } catch (_: Exception) { null }
-
-                    fun writeHazardRow(
-                        hazard: com.roadwatch.data.Hazard,
-                        activeOverride: Boolean?,
-                        votes: Int,
-                        fallbackId: String? = null,
-                    ) {
-                        val resolvedId = (hazard.optionalField("id") as? String) ?: fallbackId ?: ""
-                        val resolvedUpdatedAt = (hazard.optionalField("updatedAt") as? java.time.Instant)?.toString().orEmpty()
-                        val resolvedVotesCount = (hazard.optionalField("votesCount") as? Number)?.toInt() ?: votes
-                        val row = listOf(
-                            hazard.type.name,
-                            hazard.lat.toString(),
-                            hazard.lng.toString(),
-                            hazard.source,
-                            (activeOverride ?: hazard.active).toString(),
-                            hazard.directionality,
-                            hazard.reportedHeadingDeg.toString(),
-                            hazard.userBearing?.toString().orEmpty(),
-                            hazard.createdAt.toString(),
-                            resolvedUpdatedAt,
-                            hazard.speedLimitKph?.toString().orEmpty(),
-                            hazard.zoneLengthMeters?.toString().orEmpty(),
-                            hazard.zoneStartLat?.toString().orEmpty(),
-                            hazard.zoneStartLng?.toString().orEmpty(),
-                            hazard.zoneEndLat?.toString().orEmpty(),
-                            hazard.zoneEndLng?.toString().orEmpty(),
-                            resolvedId,
-                            votes.toString(),
-                            resolvedVotesCount.toString()
-                        )
-                        w.appendLine(row.joinToString(","))
-                    }
-
-                    // Seeds with active status based on overrides
-                    seeds.forEach { hazard ->
-                        val key = com.roadwatch.data.SeedOverrides.keyOf(hazard)
-                        val active = hazard.active && !com.roadwatch.data.SeedOverrides.isDisabled(requireContext(), key)
-                        val votes = com.roadwatch.data.CommunityVotes.getVotes(requireContext(), key)
-                        writeHazardRow(hazard, active, votes)
-                    }
-                    // User hazards
-                    users.forEach { entry ->
-                        val hazard = entry.hazard
-                        val key = com.roadwatch.data.SeedOverrides.keyOf(hazard)
-                        val votes = com.roadwatch.data.CommunityVotes.getVotes(requireContext(), key)
-                        writeHazardRow(hazard, null, votes, fallbackId = entry.id)
-                    }
-                }
-                // Also copy to public Downloads/RoadWatch (Android Q+)
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                    try {
-                        val resolver = requireContext().contentResolver
-                        val values = android.content.ContentValues().apply {
-                            put(android.provider.MediaStore.Downloads.DISPLAY_NAME, "hazards_export.csv")
-                            put(android.provider.MediaStore.Downloads.MIME_TYPE, "text/csv")
-                            put(android.provider.MediaStore.Downloads.RELATIVE_PATH, "Download/RoadWatch")
-                        }
-                        val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-                        if (uri != null) {
-                            resolver.openOutputStream(uri)?.use { outStream ->
-                                out.inputStream().use { it.copyTo(outStream) }
-                            }
-                        }
-                    } catch (_: Exception) {}
-                }
-                requireActivity().runOnUiThread {
-                    val total = seeds.size + users.size
-                    status.text = if (seedLoad.loaded) "Exported ${total} hazards (seeds + user)" else "Export completed (seed load status: failed)"
-                    refreshDataButtons()
-                }
-            }
-        }
-
-        btnShare.setOnClickListener {
-            val exportDir = File(requireContext().filesDir, "exports").apply { mkdirs() }
-            val out = File(exportDir, "hazards_export.csv")
-            if (!out.exists()) {
-                status.text = "No export file found. Tap Export first."
-                return@setOnClickListener
-            }
-            val uri = androidx.core.content.FileProvider.getUriForFile(requireContext(), "${requireContext().packageName}.fileprovider", out)
-            val share = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                type = "text/csv"
-                putExtra(android.content.Intent.EXTRA_STREAM, uri)
-                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-            startActivity(android.content.Intent.createChooser(share, "Share hazards export"))
-        }
-
-        btnImport.setOnClickListener {
-            // Prompt user to pick a CSV; fallback to internal export file if canceled
-            try {
-                importCsvLauncher.launch(arrayOf("text/csv", "text/*", "application/csv", "application/vnd.ms-excel"))
-            } catch (_: Exception) {
-                // Fallback: import from internal default path
-                ioScope.launch {
-                    val exportDir = File(requireContext().filesDir, "exports")
-                    val file = File(exportDir, "hazards_export.csv")
-                    if (file.exists()) {
-                        importFromCsvText(file.readText())
-                    } else {
-                        requireActivity().runOnUiThread {
-                            status.text = "No export file found."
-                        }
-                    }
-                }
-            }
-        }
-
-        // ...
-        btnAdmin.setOnClickListener {
-            parentFragmentManager.beginTransaction()
-                .replace(com.roadwatch.app.R.id.fragment_container, com.roadwatch.feature.admin.AdminLocationsFragment())
-                .addToBackStack(null)
-                .commit()
-        }
-
-        // Populate and bind settings
-        spnFocus.adapter = android.widget.ArrayAdapter(requireContext(), android.R.layout.simple_spinner_dropdown_item, listOf("DUCK", "EXCLUSIVE"))
-        spnCurve.adapter = android.widget.ArrayAdapter(requireContext(), android.R.layout.simple_spinner_dropdown_item, listOf("CONSERVATIVE", "NORMAL", "AGGRESSIVE"))
-        switchBg.isChecked = com.roadwatch.prefs.AppPrefs.isBackgroundAlerts(requireContext())
-        switchHaptics.isChecked = com.roadwatch.prefs.AppPrefs.isHapticsEnabled(requireContext())
-        switchAutoResume.isChecked = com.roadwatch.prefs.AppPrefs.isAutoResumeEnabled(requireContext())
-        spnFocus.setSelection(if (com.roadwatch.prefs.AppPrefs.getAudioFocusMode(requireContext()) == "EXCLUSIVE") 1 else 0)
-        val curve = com.roadwatch.prefs.AppPrefs.getSpeedCurve(requireContext())
-        spnCurve.setSelection(when (curve) { "CONSERVATIVE" -> 0; "AGGRESSIVE" -> 2; else -> 1 })
-        edtZoneEnter.setText(com.roadwatch.prefs.AppPrefs.getZoneEnter(requireContext()))
-        edtZoneExit.setText(com.roadwatch.prefs.AppPrefs.getZoneExit(requireContext()))
-        edtZoneRepeat.setText(com.roadwatch.prefs.AppPrefs.getZoneRepeatMs(requireContext()).toString())
-
-        // Cluster controls
-        switchCluster.isChecked = com.roadwatch.prefs.AppPrefs.isClusterEnabled(requireContext())
-        edtClusterSpeed.setText(com.roadwatch.prefs.AppPrefs.getClusterSpeedThreshold(requireContext()).toString())
-
-        // Add audio/visual alert toggles and default mute duration controls
-        val audioSwitch = view.findViewById<android.widget.Switch>(R.id.switch_audio)
-        val visualSwitch = view.findViewById<android.widget.Switch>(R.id.switch_visual)
-        val muteInput = view.findViewById<android.widget.EditText>(R.id.edt_mute_default)
-        val muteSave = view.findViewById<Button>(R.id.btn_mute_default_save)
-
-        audioSwitch.isChecked = com.roadwatch.prefs.AppPrefs.isAudioEnabled(requireContext())
-        visualSwitch.isChecked = com.roadwatch.prefs.AppPrefs.isVisualEnabled(requireContext())
-        muteInput.setText(com.roadwatch.prefs.AppPrefs.getDefaultMuteMinutes(requireContext()).toString())
-        audioSwitch.setOnCheckedChangeListener { _, checked -> com.roadwatch.prefs.AppPrefs.setAlertChannels(requireContext(), checked, com.roadwatch.prefs.AppPrefs.isVisualEnabled(requireContext())) }
-        visualSwitch.setOnCheckedChangeListener { _, checked -> com.roadwatch.prefs.AppPrefs.setAlertChannels(requireContext(), com.roadwatch.prefs.AppPrefs.isAudioEnabled(requireContext()), checked) }
-        switchCluster.setOnCheckedChangeListener { _, checked -> com.roadwatch.prefs.AppPrefs.setClusterEnabled(requireContext(), checked) }
-        switchHaptics.setOnCheckedChangeListener { _, checked -> com.roadwatch.prefs.AppPrefs.setHapticsEnabled(requireContext(), checked) }
-        switchAutoResume.setOnCheckedChangeListener { _, checked -> com.roadwatch.prefs.AppPrefs.setAutoResumeEnabled(requireContext(), checked) }
-        edtClusterSpeed.setOnFocusChangeListener { _, hasFocus ->
-            if (!hasFocus) {
-                val kph = edtClusterSpeed.text.toString().toIntOrNull() ?: 50
-                com.roadwatch.prefs.AppPrefs.setClusterSpeedThreshold(requireContext(), kph)
-                edtClusterSpeed.setText(com.roadwatch.prefs.AppPrefs.getClusterSpeedThreshold(requireContext()).toString())
-            }
-        }
-        muteSave.setOnClickListener {
-            val v = muteInput.text.toString().toIntOrNull() ?: 20
-            com.roadwatch.prefs.AppPrefs.setDefaultMuteMinutes(requireContext(), v)
-            status.text = "Default mute set to $v minutes"
-        }
-
-        spnFocus.onItemSelectedListener = object: android.widget.AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: android.widget.AdapterView<*>, view: View?, position: Int, id: Long) {
-                com.roadwatch.prefs.AppPrefs.setAudioFocusMode(requireContext(), if (position == 1) "EXCLUSIVE" else "DUCK")
-            }
-            override fun onNothingSelected(parent: android.widget.AdapterView<*>) {}
-        }
-        spnCurve.onItemSelectedListener = object: android.widget.AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: android.widget.AdapterView<*>, view: View?, position: Int, id: Long) {
-                val value = when (position) { 0 -> "CONSERVATIVE"; 2 -> "AGGRESSIVE"; else -> "NORMAL" }
-                com.roadwatch.prefs.AppPrefs.setSpeedCurve(requireContext(), value)
-            }
-            override fun onNothingSelected(parent: android.widget.AdapterView<*>) {}
-        }
-        btnZoneSave.setOnClickListener {
-            val repeat = edtZoneRepeat.text.toString().toLongOrNull() ?: 60000L
-            com.roadwatch.prefs.AppPrefs.setZoneConfig(requireContext(), edtZoneEnter.text.toString(), edtZoneExit.text.toString(), repeat)
-            status.text = "Zone settings saved"
-        }
-        switchBg.setOnCheckedChangeListener { _, isChecked ->
-            if (isChecked) {
-                ensureBackgroundLocationPermission { granted ->
-                    if (granted) {
-                        com.roadwatch.prefs.AppPrefs.setBackgroundAlerts(requireContext(), true)
-                        val intent = com.roadwatch.core.location.DriveModeService.createStartIntent(requireContext())
-                        requireContext().startForegroundService(intent)
-                        status.text = "Background alerts enabled"
-                    } else {
-                        switchBg.isChecked = false
-                        status.text = "Background permission denied"
-                    }
-                }
-            } else {
-                com.roadwatch.prefs.AppPrefs.setBackgroundAlerts(requireContext(), false)
-                val intent = com.roadwatch.core.location.DriveModeService.createStopIntent(requireContext())
-                requireContext().startService(intent)
-                status.text = "Background alerts disabled"
-            }
-        }
-    }
-
-    private fun ensureTts() {
-        if (tts != null) return
-        tts = TextToSpeech(requireContext()) { status ->
-            ttsReady = status == TextToSpeech.SUCCESS
-            if (ttsReady) {
-                tts?.language = Locale.getDefault()
-            }
-        }
-    }
-
-    private fun ensureNotificationPermission(callback: (Boolean) -> Unit) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
-            callback(true)
-            return
-        }
-        val granted = requireContext().checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
-        if (granted) {
-            callback(true)
-        } else {
-            pendingPermissionCallback = callback
-            requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-        }
-    }
-
-    private fun ensureBackgroundLocationPermission(callback: (Boolean) -> Unit) {
         val ctx = requireContext()
-        val fgGranted = ctx.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        if (!fgGranted) {
-            pendingBgCallback = callback
-            requestBgPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
-            return
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val bgGranted = ctx.checkSelfPermission(Manifest.permission.ACCESS_BACKGROUND_LOCATION) == PackageManager.PERMISSION_GRANTED
-            if (bgGranted) { callback(true); return }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                // Direct user to app settings for "Allow all the time"
-                startActivity(android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.fromParts("package", ctx.packageName, null)))
-                pendingBgCallback = callback
-            } else {
-                pendingBgCallback = callback
-                requestBgPermissionLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
-            }
-        } else {
-            callback(true)
-        }
-    }
-}
 
-// Import helpers
-private fun SettingsFragment.importFromCsvText(csvText: String) {
-    val rawLines = csvText.lineSequence()
-        .map { it.trimEnd('\r') }
-        .toList()
-    val headerIndex = rawLines.indexOfFirst { it.isNotBlank() }
-    if (headerIndex == -1) {
-        requireActivity().runOnUiThread {
-            view?.findViewById<TextView>(R.id.txt_status)?.text = "No rows imported"
+        bindSwitch(R.id.sw_audio, AppPrefs.isAudioEnabled(ctx)) { AppPrefs.setAlertChannels(ctx, it, AppPrefs.isVisualEnabled(ctx)) }
+        bindSwitch(R.id.sw_visual, AppPrefs.isVisualEnabled(ctx)) { AppPrefs.setAlertChannels(ctx, AppPrefs.isAudioEnabled(ctx), it) }
+        bindSwitch(R.id.sw_overlay, AppPrefs.isOverlayEnabled(ctx)) { AppPrefs.setOverlayEnabled(ctx, it) }
+        bindSwitch(R.id.sw_haptics, AppPrefs.isHapticsEnabled(ctx)) { AppPrefs.setHapticsEnabled(ctx, it) }
+        bindSwitch(R.id.sw_boost, AppPrefs.isBoostVolume(ctx)) { AppPrefs.setBoostVolume(ctx, it) }
+        bindSwitch(R.id.sw_cluster, AppPrefs.isClusterEnabled(ctx)) { AppPrefs.setClusterEnabled(ctx, it) }
+        bindSwitch(R.id.sw_caution, AppPrefs.isExtraCaution(ctx)) { AppPrefs.setExtraCaution(ctx, it) }
+
+        setupLeadSpinner(view)
+
+        view.findViewById<EditText>(R.id.edt_reaction).setText(AppPrefs.getReactionSeconds(ctx).toString())
+        view.findViewById<EditText>(R.id.edt_mute_minutes).setText(AppPrefs.getDefaultMuteMinutes(ctx).toString())
+        view.findViewById<EditText>(R.id.edt_autostop).setText(AppPrefs.getAutoStopMinutes(ctx).toString())
+        view.findViewById<Button>(R.id.btn_save_numbers).setOnClickListener {
+            AppPrefs.setReactionSeconds(ctx, view.findViewById<EditText>(R.id.edt_reaction).text.toString().toFloatOrNull() ?: 1.5f)
+            AppPrefs.setDefaultMuteMinutes(ctx, view.findViewById<EditText>(R.id.edt_mute_minutes).text.toString().toIntOrNull() ?: 20)
+            AppPrefs.setAutoStopMinutes(ctx, view.findViewById<EditText>(R.id.edt_autostop).text.toString().toIntOrNull() ?: 30)
+            status("Saved")
         }
-        return
-    }
-    val header = rawLines[headerIndex].split(',').map { it.trim() }
-    val dataLines = rawLines.drop(headerIndex + 1)
-    val totalRows = dataLines.count { it.isNotBlank() }
-    if (totalRows == 0) {
-        requireActivity().runOnUiThread {
-            view?.findViewById<TextView>(R.id.txt_status)?.text = "No rows imported"
+
+        view.findViewById<Button>(R.id.btn_overlay_settings).setOnClickListener {
+            startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}")))
         }
-        return
-    }
-
-    val progressUi = showImportProgressDialog(totalRows)
-
-    val indexByName = header.mapIndexed { index, name -> name.lowercase(Locale.US) to index }.toMap()
-    var imported = 0
-    var processed = 0
-    var skipped = 0
-    val failures = mutableListOf<String>()
-
-    fun valueFor(cols: List<String>, vararg keys: String): String? {
-        for (key in keys) {
-            val idx = indexByName[key.lowercase(Locale.US)] ?: continue
-            if (idx in cols.indices) {
-                val value = cols[idx].trim()
-                if (value.isNotEmpty()) return value
+        view.findViewById<Button>(R.id.btn_notif_settings).setOnClickListener {
+            startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, ctx.packageName))
+        }
+        view.findViewById<Button>(R.id.btn_battery_settings).setOnClickListener {
+            val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+            runCatching { startActivity(intent) }.onFailure {
+                startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${ctx.packageName}")))
             }
         }
-        return null
-    }
 
-    dataLines.forEachIndexed { offset, rawLine ->
-        val lineNumber = headerIndex + offset + 2
-        val raw = rawLine.trim()
-        if (raw.isEmpty()) return@forEachIndexed
-        val cols = raw.split(',', limit = header.size)
-        processed += 1
-        try {
-            val typeName = valueFor(cols, "type") ?: throw IllegalArgumentException("Missing type")
-            val type = com.roadwatch.data.HazardType.valueOf(typeName.uppercase(Locale.US))
-            val lat = valueFor(cols, "lat")?.toDoubleOrNull() ?: throw IllegalArgumentException("Invalid lat")
-            val lng = valueFor(cols, "lng", "lon", "long")?.toDoubleOrNull() ?: throw IllegalArgumentException("Invalid lng")
-            val source = valueFor(cols, "source")?.uppercase(Locale.US) ?: "USER"
-            val active = valueFor(cols, "active")?.let { it.equals("true", ignoreCase = true) || it == "1" } ?: true
-            val votes = valueFor(cols, "votes")?.toIntOrNull() ?: 0
-            val directionality = valueFor(cols, "directionality")?.uppercase(Locale.US) ?: "UNKNOWN"
-            val reportedHeading = valueFor(cols, "reportedHeadingDeg", "reported_heading_deg")?.toFloatOrNull() ?: 0f
-            val userBearing = valueFor(cols, "userBearing")?.toFloatOrNull()
-            val createdAt = valueFor(cols, "createdAt", "created_at")?.let {
-                try {
-                    java.time.Instant.parse(it)
-                } catch (e: java.time.format.DateTimeParseException) {
-                    try {
-                        val formatter = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSSSSS Z")
-                        java.time.ZonedDateTime.parse(it, formatter).toInstant()
-                    } catch (_: Exception) {
-                        java.time.Instant.now()
-                    }
-                }
-            } ?: java.time.Instant.now()
-            val speedKph = valueFor(cols, "speedLimitKph", "speed_limit_kph")?.toIntOrNull()
-            val zoneLen = valueFor(cols, "zoneLengthMeters", "zone_length_meters")?.toIntOrNull()
-            val zoneStartLat = valueFor(cols, "zonestartlat", "zone_start_lat")?.toDoubleOrNull()
-            val zoneStartLng = valueFor(cols, "zonestartlng", "zone_start_lng")?.toDoubleOrNull()
-            val zoneEndLat = valueFor(cols, "zoneendlat", "zone_end_lat")?.toDoubleOrNull()
-            val zoneEndLng = valueFor(cols, "zoneendlng", "zone_end_lng")?.toDoubleOrNull()
-            val hazard = com.roadwatch.data.Hazard(
-                type = type,
-                lat = lat,
-                lng = lng,
-                source = source,
-                active = active,
-                directionality = directionality,
-                reportedHeadingDeg = reportedHeading,
-                userBearing = userBearing,
-                speedLimitKph = speedKph,
-                zoneLengthMeters = zoneLen,
-                zoneStartLat = zoneStartLat,
-                zoneStartLng = zoneStartLng,
-                zoneEndLat = zoneEndLat,
-                zoneEndLng = zoneEndLng,
-                createdAt = createdAt,
-            )
-            val key = com.roadwatch.data.SeedOverrides.keyOf(hazard)
-            val localVotes = com.roadwatch.data.CommunityVotes.getVotes(requireContext(), key)
-            if (votes > localVotes) com.roadwatch.data.CommunityVotes.setVotes(requireContext(), key, votes)
-            if (source == "USER") {
-                com.roadwatch.data.HazardStore(requireContext()).upsertByKey(key, hazard)
-            } else {
-                com.roadwatch.data.SeedOverrides.setDisabled(requireContext(), key, !active)
+        val isAdmin = BuildConfig.IS_ADMIN
+        view.findViewById<Button>(R.id.btn_admin).apply {
+            text = if (isAdmin) "Manage locations" else "View locations"
+            setOnClickListener {
+                parentFragmentManager.beginTransaction()
+                    .replace(R.id.fragment_container, AdminLocationsFragment())
+                    .addToBackStack(null)
+                    .commit()
             }
-            imported += 1
-            progressUi.update(this, processed, totalRows, imported, skipped,
-                "✔ Row $lineNumber • ${type.name} (${lat.format()}, ${lng.format()})")
-        } catch (e: Exception) {
-            skipped += 1
-            val reason = e.message ?: e::class.java.simpleName
-            failures += "Row $lineNumber: $reason"
-            progressUi.update(this, processed, totalRows, imported, skipped,
-                "✖ Row $lineNumber • $reason")
+        }
+        view.findViewById<Button>(R.id.btn_export_csv).setOnClickListener { exportCsv() }
+        view.findViewById<Button>(R.id.btn_import_csv).setOnClickListener {
+            importCsvLauncher.launch(arrayOf("text/csv", "text/comma-separated-values", "text/plain", "application/csv", "application/vnd.ms-excel"))
+        }
+        view.findViewById<Button>(R.id.btn_restore_bundled).apply {
+            visibility = if (isAdmin) View.VISIBLE else View.GONE
+            setOnClickListener { confirmDestructive("Restore bundled data", "Replaces ALL hazards on this phone with the bundled dataset. A backup CSV is saved first.") { restoreBundled() } }
+        }
+        view.findViewById<Button>(R.id.btn_clear_data).apply {
+            visibility = if (isAdmin) View.VISIBLE else View.GONE
+            setOnClickListener { confirmDestructive("Clear all hazards", "Deletes ALL hazards on this phone. A backup CSV is saved first.") { clearAll() } }
+        }
+
+        view.findViewById<TextView>(R.id.txt_about).text =
+            "RoadWatch ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) · build ${BuildConfig.BUILD_ID} · ${BuildConfig.FLAVOR}"
+        refreshStatuses()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        refreshStatuses()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        io.shutdown()
+    }
+
+    private fun bindSwitch(id: Int, initial: Boolean, onChange: (Boolean) -> Unit) {
+        requireView().findViewById<SwitchCompat>(id).apply {
+            isChecked = initial
+            setOnCheckedChangeListener { _, checked -> onChange(checked) }
         }
     }
 
-    progressUi.complete(this, totalRows, imported, skipped)
-
-    if (failures.isNotEmpty()) {
-        try {
-            val errorFile = File(requireContext().filesDir, "imports/last_import_errors.txt").apply { parentFile?.mkdirs() }
-            errorFile.writeText(failures.joinToString(System.lineSeparator()))
-        } catch (_: Exception) {}
-    }
-
-    val summaryText = if (totalRows == 0) {
-        "No rows imported"
-    } else {
-        val skippedMsg = if (skipped == 0) "" else " Skipped $skipped. See files/imports/last_import_errors.txt"
-        "Imported $imported of $totalRows rows.$skippedMsg"
-    }
-
-    requireActivity().runOnUiThread {
-        view?.findViewById<TextView>(R.id.txt_status)?.text = summaryText
-    }
-}
-
-private suspend fun SettingsFragment.importFromUri(uri: Uri) {
-    val csv = requireContext().contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
-    if (csv != null) {
-        importFromCsvText(csv)
-    } else {
-        requireActivity().runOnUiThread {
-            view?.findViewById<TextView>(R.id.txt_status)?.text = "Failed to open selected file"
-        }
-    }
-}
-
-private fun SettingsFragment.showImportProgressDialog(totalRows: Int): ImportProgressUi {
-    val latch = CountDownLatch(1)
-    var holder: ImportProgressUi? = null
-    requireActivity().runOnUiThread {
-        val dialogView = layoutInflater.inflate(R.layout.dialog_import_progress, null)
-        val summary = dialogView.findViewById<TextView>(R.id.txt_progress_summary)
-        val details = dialogView.findViewById<TextView>(R.id.txt_progress_details)
-        val progressBar = dialogView.findViewById<ProgressBar>(R.id.progress_bar)
-        val scroll = dialogView.findViewById<ScrollView>(R.id.scroll_details)
-        progressBar.max = totalRows
-        summary.text = getString(R.string.import_progress_summary, 0, totalRows, 0, 0)
-
-        val dialog = AlertDialog.Builder(requireContext())
-            .setTitle(R.string.import_hazards_title)
-            .setView(dialogView)
-            .setPositiveButton(R.string.import_close, null)
-            .setCancelable(false)
-            .create()
-        dialog.setCanceledOnTouchOutside(false)
-        dialog.show()
-        val closeButton = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
-        closeButton.isEnabled = false
-        holder = ImportProgressUi(dialog, summary, details, progressBar, closeButton, scroll)
-        latch.countDown()
-    }
-    latch.await()
-    return holder!!
-}
-
-private data class ImportProgressUi(
-    val dialog: AlertDialog,
-    val summary: TextView,
-    val details: TextView,
-    val progressBar: ProgressBar,
-    val closeButton: Button,
-    val scroll: ScrollView,
-) {
-    fun update(fragment: SettingsFragment, processed: Int, total: Int, imported: Int, skipped: Int, message: String) {
-        fragment.requireActivity().runOnUiThread {
-            summary.text = fragment.getString(R.string.import_progress_summary, processed, total, imported, skipped)
-            progressBar.progress = processed
-            if (details.text.isNotEmpty()) details.append("\n")
-            details.append(message)
-            scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
+    private fun setupLeadSpinner(view: View) {
+        val ctx = requireContext()
+        val spn = view.findViewById<Spinner>(R.id.spn_lead)
+        val hint = view.findViewById<TextView>(R.id.txt_lead_hint)
+        val labels = listOf("Later (about 7 s before)", "Normal (about 10 s before)", "Earlier (about 14 s before)")
+        val values = listOf("CONSERVATIVE", "NORMAL", "AGGRESSIVE")
+        spn.adapter = ArrayAdapter(ctx, android.R.layout.simple_spinner_dropdown_item, labels)
+        spn.setSelection(values.indexOf(AppPrefs.getSpeedCurve(ctx)).coerceAtLeast(1))
+        hint.text = "Distance scales with your speed: faster driving is warned about from further away."
+        spn.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>, v: View?, position: Int, id: Long) {
+                AppPrefs.setSpeedCurve(ctx, values[position])
+            }
+            override fun onNothingSelected(parent: AdapterView<*>) {}
         }
     }
 
-    fun complete(fragment: SettingsFragment, total: Int, imported: Int, skipped: Int) {
-        fragment.requireActivity().runOnUiThread {
-            summary.text = fragment.getString(R.string.import_progress_summary, total, total, imported, skipped)
-            progressBar.progress = total
-            closeButton.isEnabled = true
+    private fun refreshStatuses() {
+        val v = view ?: return
+        val ctx = requireContext()
+        val overlay = Settings.canDrawOverlays(ctx)
+        v.findViewById<TextView>(R.id.txt_overlay_status).text =
+            if (overlay) "✔ Alerts can show over other apps" else "✖ Not allowed yet: alerts will use a pop-up notification instead"
+        v.findViewById<Button>(R.id.btn_overlay_settings).visibility = if (overlay) View.GONE else View.VISIBLE
+        val notif = NotificationManagerCompat.from(ctx).areNotificationsEnabled()
+        v.findViewById<TextView>(R.id.txt_notif_status).text =
+            if (notif) "✔ Notifications on" else "✖ Notifications are off: pop-ups can't appear (voice still works)"
+        v.findViewById<Button>(R.id.btn_notif_settings).visibility = if (notif) View.GONE else View.VISIBLE
+        val count = HazardStore(ctx).count()
+        v.findViewById<TextView>(R.id.txt_data_summary).text = "$count hazards on this phone"
+    }
+
+    private fun status(msg: String) {
+        view?.findViewById<TextView>(R.id.txt_status)?.text = msg
+    }
+
+    private fun exportCsv() {
+        val ctx = requireContext()
+        io.execute {
+            val file = HazardTransfer.exportCsv(ctx)
+            activity?.runOnUiThread {
+                status("Exported ${HazardStore(ctx).count()} hazards")
+                startActivity(HazardTransfer.share(ctx, file, "text/csv", "Share hazards"))
+            }
+        }
+    }
+
+    private fun importFrom(uri: Uri) {
+        val ctx = requireContext()
+        io.execute {
+            val summary = try {
+                val text = ctx.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                if (text == null) "Could not open the selected file" else HazardTransfer.importCsv(ctx, text).toString()
+            } catch (e: Exception) {
+                "Import failed: ${e.message}"
+            }
+            activity?.runOnUiThread {
+                status(summary)
+                AlertDialog.Builder(ctx).setTitle("Import").setMessage(summary).setPositiveButton("OK", null).show()
+                refreshStatuses()
+            }
+        }
+    }
+
+    private fun confirmDestructive(title: String, message: String, action: () -> Unit) {
+        AlertDialog.Builder(requireContext()).setTitle(title).setMessage(message)
+            .setPositiveButton("Continue") { _, _ -> action() }
+            .setNegativeButton("Cancel", null).show()
+    }
+
+    private fun restoreBundled() {
+        val ctx = requireContext()
+        io.execute {
+            HazardTransfer.backup(ctx, "before_restore")
+            val n = SeedRepository(ctx).resetToBundledSeeds()
+            activity?.runOnUiThread { status(if (n >= 0) "Restored $n bundled hazards" else "Restore failed"); refreshStatuses() }
+        }
+    }
+
+    private fun clearAll() {
+        val ctx = requireContext()
+        io.execute {
+            HazardTransfer.backup(ctx, "before_clear")
+            val ok = HazardStore(ctx).replaceAll(emptyList())
+            ctx.getSharedPreferences("seed_overrides", Context.MODE_PRIVATE).edit().clear().apply()
+            ctx.getSharedPreferences("community_votes", Context.MODE_PRIVATE).edit().clear().apply()
+            activity?.runOnUiThread {
+                status(if (ok) "All hazards cleared (backup saved in exports)" else "Clear failed")
+                if (!ok) Toast.makeText(ctx, "Clear failed", Toast.LENGTH_SHORT).show()
+                refreshStatuses()
+            }
         }
     }
 }
-
-private fun Double.format(digits: Int = 6): String = String.format(Locale.US, "%.${digits}f", this).trim()

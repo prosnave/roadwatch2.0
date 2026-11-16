@@ -1,157 +1,133 @@
 package com.roadwatch.feature.home
 
+import android.Manifest
+import android.app.AlertDialog
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.location.LocationManager
 import android.os.Bundle
+import android.provider.Settings
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.TextView
-import androidx.fragment.app.Fragment
-import com.roadwatch.app.R
-import com.roadwatch.data.SeedRepository
-import android.Manifest
-import android.app.AlertDialog
-import android.content.Intent
-import android.content.pm.PackageManager
-import android.location.LocationManager
-import android.provider.Settings
-import android.widget.Toast
 import androidx.core.content.ContextCompat
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import androidx.activity.result.contract.ActivityResultContracts
+import androidx.fragment.app.Fragment
+import com.roadwatch.app.BuildConfig
+import com.roadwatch.app.R
+import com.roadwatch.core.location.DriveModeService
+import com.roadwatch.data.SeedRepository
+import com.roadwatch.drive.DriveSession
+import com.roadwatch.engine.Geo
+import com.roadwatch.feature.drive.DriveHudFragment
+import com.roadwatch.feature.fieldtest.FieldTestFragment
+import com.roadwatch.feature.settings.SettingsFragment
+import com.roadwatch.prefs.AppPrefs
+import java.util.concurrent.Executors
 
 class HomeFragment : Fragment() {
-    private val ioScope = CoroutineScope(Dispatchers.IO)
+    private val io = Executors.newSingleThreadExecutor()
+    private var hazardCount = 0
+    private var headingReviewCount = 0
 
-    private var pendingLocCallback: (() -> Unit)? = null
+    private val sessionListener: (DriveSession.State) -> Unit = { s -> view?.post { render(s) } }
 
-    private val requestPermissionLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
-            if (isGranted) {
-                pendingLocCallback?.invoke()
-            } else {
-                Toast.makeText(requireContext(), "Location permission is required.", Toast.LENGTH_SHORT).show()
-            }
-            pendingLocCallback = null
-        }
-
-    override fun onCreateView(
-        inflater: LayoutInflater,
-        container: ViewGroup?,
-        savedInstanceState: Bundle?
-    ): View {
-        return inflater.inflate(R.layout.fragment_home, container, false)
-    }
+    override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View =
+        inflater.inflate(R.layout.fragment_home, container, false)
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        view.findViewById<TextView>(R.id.txt_version).text = "v${BuildConfig.VERSION_NAME} · ${BuildConfig.BUILD_ID}"
 
-        val statusText = view.findViewById<TextView>(R.id.status_text)
-        val startBtn = view.findViewById<Button>(R.id.btn_start_drive)
-        val stopBtn = view.findViewById<Button>(R.id.btn_stop_drive)
-        val settingsBtn = view.findViewById<Button>(R.id.btn_open_settings)
+        view.findViewById<Button>(R.id.btn_start_drive).setOnClickListener {
+            ensureLocationEnabled { open(DriveHudFragment()) }
+        }
+        view.findViewById<Button>(R.id.btn_stop_drive).setOnClickListener {
+            requireContext().startService(DriveModeService.createStopIntent(requireContext()))
+        }
+        view.findViewById<Button>(R.id.btn_open_settings).setOnClickListener { open(SettingsFragment()) }
+        view.findViewById<Button>(R.id.btn_field_test).setOnClickListener { open(FieldTestFragment()) }
 
-        ioScope.launch {
-            val repo = SeedRepository(requireContext())
-            val visible = repo.activeHazards().size
-            withContext(Dispatchers.Main) {
-                statusText.text = "Ready • Visible hazards: ${visible}"
-            }
+        io.execute {
+            val hazards = SeedRepository(requireContext().applicationContext).activeHazards()
+            hazardCount = hazards.size
+            headingReviewCount = hazards.count { !it.isZone && !it.headingKnown }
+            view.post { render(DriveSession.state) }
         }
+        view.post { suggestResume(view) }
+    }
 
-        startBtn.setOnClickListener {
-            ensureLocationEnabled {
-                parentFragmentManager
-                    .beginTransaction()
-                    .replace(
-                        com.roadwatch.app.R.id.fragment_container,
-                        com.roadwatch.feature.drive.DriveHudFragment()
-                    )
-                    .addToBackStack(null)
-                    .commit()
-            }
-        }
-        stopBtn.setOnClickListener {
-            (activity as? com.roadwatch.app.MainActivity)?.stopDriveMode()
-            stopBtn.visibility = View.GONE
-            startBtn.visibility = View.VISIBLE
-            statusText.text = getString(R.string.ready)
-        }
-        settingsBtn.setOnClickListener {
-            parentFragmentManager
-                .beginTransaction()
-                .replace(
-                    com.roadwatch.app.R.id.fragment_container,
-                    com.roadwatch.feature.settings.SettingsFragment()
-                )
-                .addToBackStack(null)
-                .commit()
-        }
+    override fun onStart() {
+        super.onStart()
+        DriveSession.addListener(sessionListener)
+    }
 
-        // Auto-resume suggestion: if we stopped recently and moved >100m
-        view.post {
-            try {
-                if (!com.roadwatch.prefs.AppPrefs.isAutoResumeEnabled(requireContext())) return@post
-                val lastLat = com.roadwatch.prefs.AppPrefs.getLastAutoStopLat(requireContext())
-                val lastLng = com.roadwatch.prefs.AppPrefs.getLastAutoStopLng(requireContext())
-                val lastAt = com.roadwatch.prefs.AppPrefs.getLastAutoStopAt(requireContext())
-                if (lastLat != null && lastLng != null && lastAt != null && System.currentTimeMillis() - lastAt < 2 * 60 * 60 * 1000) {
-                    val lm = requireContext().getSystemService(android.content.Context.LOCATION_SERVICE) as LocationManager
-                    val providers = lm.getProviders(true)
-                    var best: android.location.Location? = null
-                    for (p in providers) {
-                        val l = lm.getLastKnownLocation(p) ?: continue
-                        if (best == null || l.accuracy < best.accuracy) best = l
-                    }
-                    if (best != null) {
-                        val d = distanceMeters(lastLat, lastLng, best.latitude, best.longitude)
-                        if (d > 100.0) {
-                            android.app.AlertDialog.Builder(requireContext())
-                                .setTitle("Resume Drive Mode?")
-                                .setMessage("You’ve moved ${d.toInt()} m since last stop.")
-                                .setPositiveButton("Resume") { _, _ ->
-                                    com.roadwatch.prefs.AppPrefs.clearAutoStop(requireContext())
-                                    startBtn.performClick()
-                                }
-                                .setNegativeButton("Not now", null)
-                                .show()
-                        }
-                    }
-                }
-            } catch (_: Exception) {}
+    override fun onStop() {
+        super.onStop()
+        DriveSession.removeListener(sessionListener)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        io.shutdown()
+    }
+
+    private fun open(f: Fragment) {
+        parentFragmentManager.beginTransaction().replace(R.id.fragment_container, f).addToBackStack(null).commit()
+    }
+
+    private fun render(s: DriveSession.State) {
+        val v = view ?: return
+        val start = v.findViewById<Button>(R.id.btn_start_drive)
+        val stop = v.findViewById<Button>(R.id.btn_stop_drive)
+        val status = v.findViewById<TextView>(R.id.status_text)
+        if (s.running) {
+            start.text = "Open Drive Mode"
+            stop.visibility = View.VISIBLE
+            status.text = if (s.simulated) "Simulation running • ${s.alertCount} alerts so far"
+            else "Drive Mode running • ${s.alertCount} alerts so far\nAlerts keep working if you switch to Maps or lock the screen."
+        } else {
+            start.text = getString(R.string.start_drive_mode)
+            stop.visibility = View.GONE
+            status.text = "Ready • $hazardCount hazards on this phone" +
+                if (headingReviewCount > 0) "\n$headingReviewCount need heading review and will not warn. Park, open Drive Mode and tap their map pins to edit." else ""
         }
     }
 
-    private fun distanceMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
-        val R = 6371000.0
-        val dLat = Math.toRadians(lat2 - lat1)
-        val dLon = Math.toRadians(lon2 - lon1)
-        val a = kotlin.math.sin(dLat / 2) * kotlin.math.sin(dLat / 2) +
-                kotlin.math.cos(Math.toRadians(lat1)) * kotlin.math.cos(Math.toRadians(lat2)) *
-                kotlin.math.sin(dLon / 2) * kotlin.math.sin(dLon / 2)
-        val c = 2 * kotlin.math.atan2(kotlin.math.sqrt(a), kotlin.math.sqrt(1 - a))
-        return R * c
+    /** After an automatic stop, offer to resume if the phone has since moved a good distance (e.g. you drove off again). */
+    private fun suggestResume(view: View) {
+        val ctx = context ?: return
+        if (DriveSession.state.running || !AppPrefs.isAutoResumeEnabled(ctx)) return
+        val lat = AppPrefs.getLastAutoStopLat(ctx) ?: return
+        val lng = AppPrefs.getLastAutoStopLng(ctx) ?: return
+        val at = AppPrefs.getLastAutoStopAt(ctx) ?: return
+        if (System.currentTimeMillis() - at > 2 * 3600_000L) return
+        if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) return
+        val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        val best = lm.getProviders(true).mapNotNull { runCatching { lm.getLastKnownLocation(it) }.getOrNull() }.minByOrNull { it.accuracy } ?: return
+        val d = Geo.distanceMeters(lat, lng, best.latitude, best.longitude)
+        if (d > 100.0) {
+            AlertDialog.Builder(ctx)
+                .setTitle("Resume Drive Mode?")
+                .setMessage("You've moved ${d.toInt()} m since Drive Mode stopped.")
+                .setPositiveButton("Resume") { _, _ ->
+                    AppPrefs.clearAutoStop(ctx)
+                    view.findViewById<Button>(R.id.btn_start_drive).performClick()
+                }
+                .setNegativeButton("Not now", null)
+                .show()
+        }
     }
 
     private fun ensureLocationEnabled(onReady: () -> Unit) {
-        val granted = ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        if (!granted) {
-            pendingLocCallback = onReady
-            requestPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
-            return
-        }
-        val lm = requireContext().getSystemService(android.content.Context.LOCATION_SERVICE) as LocationManager
-        val enabled = lm.isProviderEnabled(LocationManager.GPS_PROVIDER) || lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
-        if (!enabled) {
+        val lm = requireContext().getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        if (!lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
             AlertDialog.Builder(requireContext())
-                .setTitle("Enable Location")
-                .setMessage("Please enable Location services to start Drive Mode.")
-                .setPositiveButton("Open Settings") { _, _ ->
-                    startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
-                }
+                .setTitle("Turn on Location")
+                .setMessage("Drive Mode needs GPS. Please switch Location on.")
+                .setPositiveButton("Open Settings") { _, _ -> startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)) }
                 .setNegativeButton("Cancel", null)
                 .show()
             return

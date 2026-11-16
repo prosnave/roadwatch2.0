@@ -2,16 +2,37 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
+    android:background="@color/background"
     android:gravity="center"
+    android:orientation="vertical"
     android:padding="24dp">
 
     <TextView
-        android:id="@+id/txt_perm_status"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Checking permissions..."
-        android:textSize="16sp"/>
+        android:text="Before you drive"
+        android:textSize="24sp"
+        android:textStyle="bold" />
 
+    <TextView
+        android:id="@+id/txt_perm_status"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:text="RoadWatch needs your location to know when a reported hazard is ahead, and notifications to keep working while you use other apps."
+        android:textSize="16sp" />
+
+    <Button
+        android:id="@+id/btn_grant"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="24dp"
+        android:text="Continue" />
+
+    <Button
+        android:id="@+id/btn_app_settings"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Open app settings"
+        android:visibility="gone" />
 </LinearLayout>
-

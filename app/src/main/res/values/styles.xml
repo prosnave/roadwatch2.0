@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Widget.RoadWatch.Scope" parent="Widget.Material3.Button.OutlinedButton">
+        <item name="android:minHeight">56dp</item>
+        <item name="android:paddingStart">12dp</item>
+        <item name="android:paddingEnd">12dp</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="cornerRadius">16dp</item>
+        <item name="backgroundTint">@color/report_scope_background</item>
+    </style>
+    <style name="Widget.RoadWatch.Report" parent="Widget.Material3.Button.TonalButton">
+        <item name="android:minHeight">60dp</item>
+        <item name="android:textSize">15sp</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:paddingStart">12dp</item>
+        <item name="android:paddingEnd">12dp</item>
+        <item name="cornerRadius">16dp</item>
+        <item name="iconSize">22dp</item>
+        <item name="iconPadding">8dp</item>
+    </style>
+</resources>

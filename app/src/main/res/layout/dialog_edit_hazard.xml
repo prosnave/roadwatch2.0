@@ -27,7 +27,7 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="16dp"
-        android:text="Directionality" />
+        android:text="Who should be warned?" />
 
     <RadioGroup
         android:id="@+id/radio_group_directionality"
@@ -39,15 +39,20 @@
             android:id="@+id/radio_one_way"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="One-way" />
+            android:text="Reported travel direction only" />
 
         <RadioButton
             android:id="@+id/radio_two_way"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Two-way" />
+            android:text="Both travel directions (only if confirmed)" />
     </RadioGroup>
 
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="12dp" android:text="Travel heading at the hazard: 0 = North, 90 = East, 180 = South, 270 = West. On divided roads, check the side AND heading. Unknown headings are saved but do not warn."/>
+    <EditText android:id="@+id/edt_hazard_heading" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:minHeight="48dp" android:inputType="numberDecimal"
+        android:hint="Travel heading (0 to less than 360)" android:importantForAutofill="no"/>
     <TextView
         android:id="@+id/txt_quick_actions"
         android:layout_width="wrap_content"

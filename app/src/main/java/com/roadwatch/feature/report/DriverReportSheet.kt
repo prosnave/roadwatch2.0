@@ -70,35 +70,12 @@ class DriverReportSheet : BottomSheetDialogFragment() {
         var zoneEnd: android.location.Location? = null
 
         fun report(selected: HazardType) {
-            val loc = DriveModeService.lastKnownLocation
-            if (loc == null) {
-                com.roadwatch.ui.UiAlerts.error(view, "Location unavailable")
-                return
-            }
-
-            val userBearing = if (loc.hasBearing()) loc.bearing else 0.0f
             val directionality = if (toggleDir?.checkedButtonId == R.id.btn_two_way) "BIDIRECTIONAL" else "ONE_WAY"
-
-            val repo = SeedRepository(requireContext())
-            val hazard = Hazard(
-                type = selected,
-                lat = loc.latitude,
-                lng = loc.longitude,
-                reportedHeadingDeg = userBearing,
-                directionality = directionality,
-                userBearing = userBearing,
-                active = true,
-                source = "USER",
-                createdAt = Instant.now()
-            )
-            val result = repo.addUserHazardWithDedup(hazard)
-            when (result) {
-                SeedRepository.AddResult.ADDED -> {
-                    handleHazardAdded(view, hazard, "Reported ${selected.name}", allowDirectionConfirm = true)
-                }
-                SeedRepository.AddResult.DUPLICATE_NEARBY -> com.roadwatch.ui.UiAlerts.warn(view, "Similar ${selected.name.lowercase().replace('_',' ')} within 30 m")
-                else -> com.roadwatch.ui.UiAlerts.error(view, "Report failed")
-            }
+            val result = com.roadwatch.drive.ReportActions.report(requireContext(), selected, directionality)
+            if (result.ok) {
+                com.roadwatch.ui.UiAlerts.success(view, result.message)
+                dismissAllowingStateLoss()
+            } else com.roadwatch.ui.UiAlerts.error(view, result.message)
             // Only dismiss on success; keep sheet open for errors/duplicates so user can adjust
         }
 
@@ -214,6 +191,9 @@ class DriverReportSheet : BottomSheetDialogFragment() {
                 zoneStartLng = zoneStart?.longitude,
                 zoneEndLat = zoneEnd?.latitude,
                 zoneEndLng = zoneEnd?.longitude,
+                schemaVersion = 2,
+                headingValid = loc.hasBearing(),
+                reportAccuracyM = loc.accuracy,
             )
             when (repo.addUserHazardWithDedup(h)) {
                 SeedRepository.AddResult.ADDED -> {
@@ -281,20 +261,6 @@ class DriverReportSheet : BottomSheetDialogFragment() {
         if (com.roadwatch.prefs.AppPrefs.isHapticsEnabled(requireContext())) {
             try { com.roadwatch.core.util.Haptics.tap(requireContext()) } catch (_: Exception) {}
         }
-        try {
-            val refreshIntent = android.content.Intent("com.roadwatch.REFRESH_HAZARDS")
-            requireContext().sendBroadcast(refreshIntent)
-
-            val details = "Type: ${hazard.type.name}\n" +
-                    "Location: (${hazard.lat}, ${hazard.lng})\n" +
-                    "User Bearing: ${hazard.userBearing}\n" +
-                    "Directionality: ${hazard.directionality}"
-            val reportIntent = android.content.Intent("com.roadwatch.HAZARD_REPORTED").apply {
-                putExtra("hazard_details", details)
-            }
-            requireContext().sendBroadcast(reportIntent)
-        } catch (_: Exception) {}
-
         try { com.roadwatch.prefs.AppPrefs.setLastHazardDirection(requireContext(), hazard.directionality) } catch (_: Exception) {}
         dismissAllowingStateLoss()
     }

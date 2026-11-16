@@ -25,6 +25,12 @@ object AppPrefs {
     private const val KEY_LAST_HAZARD_DIRECTION = "last_hazard_direction"
     private const val KEY_LAST_HAZARD_AT = "last_hazard_at"
     private const val KEY_DRIVE_MAP_ZOOM = "drive_map_zoom"
+    private const val KEY_EXTRA_CAUTION = "extra_caution"
+    private const val KEY_REACTION_SEC = "report_reaction_sec"
+    private const val KEY_REPORT_DIR = "report_directionality"
+    private const val KEY_OVERLAY = "overlay_enabled"
+    private const val KEY_BOOST_VOLUME = "boost_volume"
+    private const val KEY_AUTOSTOP_MIN = "autostop_minutes"
 
     fun setMutedForMinutes(context: Context, minutes: Int) {
         val until = System.currentTimeMillis() + minutes * 60_000L
@@ -215,5 +221,63 @@ object AppPrefs {
     fun getDriveMapZoom(context: Context): Float? {
         val prefs = context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
         return if (prefs.contains(KEY_DRIVE_MAP_ZOOM)) prefs.getFloat(KEY_DRIVE_MAP_ZOOM, 0f) else null
+    }
+
+    // ---- Alert timing -------------------------------------------------------------------------
+    /**
+     * Seconds of warning before a hazard. Stored under the legacy speed-curve key
+     * (CONSERVATIVE/NORMAL/AGGRESSIVE) so existing installs keep their choice; the UI now labels
+     * them Later / Normal / Earlier.
+     */
+    fun getLeadSeconds(context: Context): Double = when (getSpeedCurve(context)) {
+        "CONSERVATIVE" -> 7.0
+        "AGGRESSIVE" -> 14.0
+        else -> 10.0
+    }
+
+    fun setExtraCaution(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .edit().putBoolean(KEY_EXTRA_CAUTION, enabled).apply()
+    }
+    /** Manual "rain / poor visibility" switch: lengthens warning distance. */
+    fun isExtraCaution(context: Context): Boolean =
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE).getBoolean(KEY_EXTRA_CAUTION, false)
+
+    // ---- Reporting ----------------------------------------------------------------------------
+    /** Seconds between seeing a hazard and pressing the button; the report is placed that far back. */
+    fun getReactionSeconds(context: Context): Float =
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE).getFloat(KEY_REACTION_SEC, 1.5f)
+    fun setReactionSeconds(context: Context, seconds: Float) {
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .edit().putFloat(KEY_REACTION_SEC, seconds.coerceIn(0f, 5f)).apply()
+    }
+
+    /** ONE_WAY (this direction only) or BIDIRECTIONAL; remembered between reports. */
+    fun getReportDirectionality(context: Context): String =
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE).getString(KEY_REPORT_DIR, "ONE_WAY") ?: "ONE_WAY"
+    fun setReportDirectionality(context: Context, value: String) {
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit().putString(KEY_REPORT_DIR, value).apply()
+    }
+
+    // ---- Delivery -----------------------------------------------------------------------------
+    /** Show the banner over other apps (needs the "Display over other apps" permission). */
+    fun isOverlayEnabled(context: Context): Boolean =
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE).getBoolean(KEY_OVERLAY, true)
+    fun setOverlayEnabled(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit().putBoolean(KEY_OVERLAY, enabled).apply()
+    }
+
+    /** Temporarily raise media volume to a minimum while an alert is spoken (restored afterwards). */
+    fun isBoostVolume(context: Context): Boolean =
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE).getBoolean(KEY_BOOST_VOLUME, false)
+    fun setBoostVolume(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit().putBoolean(KEY_BOOST_VOLUME, enabled).apply()
+    }
+
+    /** Minutes without movement before Drive Mode switches itself off (0 = never). */
+    fun getAutoStopMinutes(context: Context): Int =
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE).getInt(KEY_AUTOSTOP_MIN, 30)
+    fun setAutoStopMinutes(context: Context, minutes: Int) {
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit().putInt(KEY_AUTOSTOP_MIN, minutes.coerceIn(0, 240)).apply()
     }
 }

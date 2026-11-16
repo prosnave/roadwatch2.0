@@ -1,1051 +1,630 @@
 package com.roadwatch.feature.drive
 
+import android.Manifest
+import android.annotation.SuppressLint
+import android.app.AlertDialog
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.location.LocationManager
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.provider.Settings
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Button
+import android.widget.ArrayAdapter
+import android.widget.RadioGroup
+import android.widget.Spinner
+import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
+import androidx.core.content.res.ResourcesCompat
 import androidx.fragment.app.Fragment
 import com.google.android.gms.maps.CameraUpdateFactory
-import com.google.android.gms.maps.SupportMapFragment
-import com.google.android.gms.maps.model.LatLng
-import com.google.android.gms.maps.model.MarkerOptions
-import com.roadwatch.app.R
-import com.roadwatch.data.SeedRepository
-import com.roadwatch.prefs.AppPrefs
-import com.roadwatch.feature.report.DriverReportSheet
-import com.roadwatch.data.Hazard
-import com.roadwatch.data.HazardType
-import java.time.Instant
 import com.google.android.gms.maps.GoogleMap
-import android.Manifest
-import android.content.pm.PackageManager
-import androidx.core.content.ContextCompat
-import android.location.Location
-import android.location.LocationListener
-import android.location.LocationManager
-import android.os.Looper
-import android.content.BroadcastReceiver
-import android.content.IntentFilter
-import android.graphics.Bitmap
-import android.graphics.Canvas
-import androidx.core.content.res.ResourcesCompat
-import androidx.core.app.NotificationManagerCompat
+import com.google.android.gms.maps.SupportMapFragment
 import com.google.android.gms.maps.model.BitmapDescriptor
 import com.google.android.gms.maps.model.BitmapDescriptorFactory
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import com.google.android.gms.maps.model.CameraPosition
+import com.google.android.gms.maps.model.LatLng
+import com.google.android.gms.maps.model.MapStyleOptions
+import com.google.android.gms.maps.model.MarkerOptions
+import com.google.android.material.button.MaterialButton
+import com.google.android.material.button.MaterialButtonToggleGroup
+import com.google.android.material.card.MaterialCardView
+import com.google.android.material.snackbar.Snackbar
+import com.roadwatch.app.BuildConfig
+import com.roadwatch.app.R
+import com.roadwatch.core.location.DriveModeService
+import com.roadwatch.data.CommunityVotes
+import com.roadwatch.data.Hazard
+import com.roadwatch.data.HazardStore
+import com.roadwatch.data.HazardType
+import com.roadwatch.data.SeedOverrides
+import com.roadwatch.data.SeedRepository
+import com.roadwatch.data.UserHazard
+import com.roadwatch.drive.DriveActions
+import com.roadwatch.drive.DriveSession
+import com.roadwatch.drive.ReportActions
+import com.roadwatch.engine.AlertText
+import com.roadwatch.engine.Geo
+import com.roadwatch.feature.report.DriverReportSheet
+import com.roadwatch.prefs.AppPrefs
+import com.roadwatch.ui.UiAlerts
 import java.util.Locale
-import androidx.activity.result.contract.ActivityResultContracts
-import android.util.TypedValue
-import android.widget.LinearLayout
-import kotlin.math.abs
+import java.util.concurrent.Executors
 
+/**
+ * Heads-up display for Drive Mode. This screen is a pure *observer* of [DriveSession]: the foreground
+ * service owns GPS, matching and alerts, so leaving this screen (e.g. to use Google Maps) does not
+ * stop alerts. It adds the map, one-tap reporting with Undo, and live status.
+ */
 class DriveHudFragment : Fragment() {
-    private val ioScope = CoroutineScope(Dispatchers.IO)
+    private val io = Executors.newSingleThreadExecutor()
+    private val handler = Handler(Looper.getMainLooper())
     private var googleMap: GoogleMap? = null
-    private var lm: LocationManager? = null
-    private var firstFix = true
-    private var txtSpeed: android.widget.TextView? = null
-    private var txtBearing: android.widget.TextView? = null
-    private var lastBaselineLoc: Location? = null
-    private var lastBaselineTime: Long = 0L
-    private var lastMoveTime: Long = 0L
-    private val idleDistanceMeters = 100.0
-    private val idleTimeoutMs = 120_000L
-    private var providersReceiver: BroadcastReceiver? = null
-    private var overlayReceiver: BroadcastReceiver? = null
-    private var baseSpeedTextSizePx = 0f
-    private var baseBearingTextSizePx = 0f
-    private var baseLabelTextSizePx = 0f
-    private var baseSubtitleTextSizePx = 0f
-    private var baseCardPaddingHorizontalPx = 0
-    private var baseCardPaddingVerticalPx = 0
+
+    private var sawRunning = false
+    private var lastShownAlertId = -1L
     private var preferredZoom = DEFAULT_MAP_ZOOM
     private var userAdjustingCamera = false
+    private var pendingMove: UserHazard? = null
+    private var lastMarkerRefresh = 0L
 
-    private val requestPermissionLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
-            permissions.entries.forEach {
-                val permission = it.key
-                val isGranted = it.value
-                if (permission == Manifest.permission.ACCESS_FINE_LOCATION) {
-                    if (isGranted) {
-                        enableMyLocation()
-                    } else {
-                        Toast.makeText(requireContext(), "Location permission required", Toast.LENGTH_SHORT).show()
-                        parentFragmentManager.popBackStack()
-                    }
-                }
-                if (permission == Manifest.permission.POST_NOTIFICATIONS) {
-                    if (!isGranted) {
-                        Toast.makeText(requireContext(), "Notifications are required for alerts", Toast.LENGTH_SHORT).show()
-                        parentFragmentManager.popBackStack()
-                    }
-                }
-            }
-        }
+    private val hideAlertCard = Runnable {
+        view?.findViewById<MaterialCardView>(R.id.alert_overlay)?.visibility = View.GONE
+    }
 
-    private val locListener = object : LocationListener {
-        override fun onLocationChanged(location: Location) {
-            googleMap?.isMyLocationEnabled = hasFinePermission()
-            // Update HUD speed and bearing
-            updateHudFrom(location)
-            updateNextHazardChip(location)
-            evaluateIdleStop(location)
-            val zoom = clampZoom(preferredZoom)
-            if (abs(zoom - preferredZoom) > 0.01f) {
-                preferredZoom = zoom
-                AppPrefs.setDriveMapZoom(requireContext(), zoom)
+    private val sessionListener: (DriveSession.State) -> Unit = { s -> handler.post { render(s) } }
+    private val storeListener: () -> Unit = { handler.post { refreshMarkers() } }
+
+    private val checkProviders = object : Runnable {
+        override fun run() {
+            val ctx = context ?: return
+            val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+            if (!lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+                Toast.makeText(ctx, "GPS is off. Turn on Location to get alerts.", Toast.LENGTH_LONG).show()
+            } else if (!hasFinePermission()) {
+                Toast.makeText(ctx, "Location permission revoked. Stopping Drive Mode.", Toast.LENGTH_SHORT).show()
+                stopDrive()
+                return
             }
-            val cameraPosition = com.google.android.gms.maps.model.CameraPosition.Builder()
-                .target(LatLng(location.latitude, location.longitude))
-                .zoom(preferredZoom)
-                .bearing(location.bearing)
-                .tilt(45f)
-                .build()
-            googleMap?.animateCamera(CameraUpdateFactory.newCameraPosition(cameraPosition))
+            handler.postDelayed(this, 15_000L)
         }
     }
 
-    override fun onCreateView(
-        inflater: LayoutInflater,
-        container: ViewGroup?,
-        savedInstanceState: Bundle?
-    ): View {
-        return inflater.inflate(R.layout.fragment_drive_hud, container, false)
-    }
+    private val permissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+            if (result[Manifest.permission.ACCESS_FINE_LOCATION] == false) {
+                Toast.makeText(requireContext(), "Location permission required", Toast.LENGTH_SHORT).show()
+                parentFragmentManager.popBackStack()
+            } else if (result[Manifest.permission.ACCESS_FINE_LOCATION] == true) {
+                showMyLocation()
+                startServiceIfReady()
+            }
+            if (result[Manifest.permission.POST_NOTIFICATIONS] == false) {
+                Toast.makeText(requireContext(), "Without notifications, alert pop-ups can't show (voice still works).", Toast.LENGTH_LONG).show()
+            }
+        }
+
+    override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View =
+        inflater.inflate(R.layout.fragment_drive_hud, container, false)
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        ensurePermissions()
+        setupMap(view)
+        setupControls(view)
 
-        // Ensure required permissions and services
-        ensurePrerequisitesOrExit()
+        if (!DriveSession.state.running) startServiceIfReady()
+        updateMuteUi(view)
+        maybePromptOverlayPermission()
+    }
 
-        // Setup map
-        val mapTag = "drive_map"
-        var mapFragment = childFragmentManager.findFragmentByTag(mapTag) as? SupportMapFragment
+    override fun onStart() {
+        super.onStart()
+        DriveSession.addListener(sessionListener)
+        HazardStore.addListener(storeListener)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        activity?.window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        handler.postDelayed(checkProviders, 15_000L)
+    }
+
+    override fun onPause() {
+        super.onPause()
+        activity?.window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        handler.removeCallbacks(checkProviders)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        DriveSession.removeListener(sessionListener)
+        HazardStore.removeListener(storeListener)
+    }
+
+    override fun onDestroyView() {
+        super.onDestroyView()
+        handler.removeCallbacksAndMessages(null)
+        googleMap = null
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        io.shutdown()
+    }
+
+    // ---- setup -------------------------------------------------------------------------------
+
+    private fun setupMap(view: View) {
+        val tag = "drive_map"
+        var mapFragment = childFragmentManager.findFragmentByTag(tag) as? SupportMapFragment
         if (mapFragment == null) {
             mapFragment = SupportMapFragment.newInstance()
-            childFragmentManager.beginTransaction()
-                .replace(R.id.map_container, mapFragment, mapTag)
-                .commitNow()
+            childFragmentManager.beginTransaction().replace(R.id.map_container, mapFragment, tag).commitNow()
         }
         mapFragment.getMapAsync { gMap ->
             googleMap = gMap
             gMap.uiSettings.isMyLocationButtonEnabled = false
             gMap.uiSettings.isCompassEnabled = true
             gMap.isTrafficEnabled = true
+            showMyLocation()
 
-            AppPrefs.getDriveMapZoom(requireContext())?.let {
-                val clamped = clampZoom(it)
-                preferredZoom = clamped
-                if (abs(clamped - it) > 0.01f) {
-                    AppPrefs.setDriveMapZoom(requireContext(), clamped)
-                }
-            }
-
+            AppPrefs.getDriveMapZoom(requireContext())?.let { preferredZoom = it.coerceIn(MIN_MAP_ZOOM, MAX_MAP_ZOOM) }
             gMap.setOnCameraMoveStartedListener { reason ->
-                if (reason == GoogleMap.OnCameraMoveStartedListener.REASON_GESTURE) {
-                    userAdjustingCamera = true
-                }
-            }
-            gMap.setOnCameraMoveCanceledListener {
-                userAdjustingCamera = false
+                if (reason == GoogleMap.OnCameraMoveStartedListener.REASON_GESTURE) userAdjustingCamera = true
             }
             gMap.setOnCameraIdleListener {
                 if (userAdjustingCamera) {
-                    val zoom = clampZoom(gMap.cameraPosition.zoom)
-                    if (abs(zoom - preferredZoom) > 0.01f) {
-                        preferredZoom = zoom
-                        AppPrefs.setDriveMapZoom(requireContext(), zoom)
-                    }
+                    preferredZoom = gMap.cameraPosition.zoom.coerceIn(MIN_MAP_ZOOM, MAX_MAP_ZOOM)
+                    AppPrefs.setDriveMapZoom(requireContext(), preferredZoom)
                 }
                 userAdjustingCamera = false
             }
-            // Night mode polish: apply dark map style when in night mode
-            try {
-                val night = (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
-                if (night) {
-                    val opts = com.google.android.gms.maps.model.MapStyleOptions.loadRawResourceStyle(requireContext(), com.roadwatch.app.R.raw.map_style_night)
-                    gMap.setMapStyle(opts)
-                }
-            } catch (_: Exception) {}
-            enableMyLocation()
-            // Center to last known location at a navigation-friendly zoom
-            lastKnown()?.let { lk ->
-                gMap.moveCamera(
-                    CameraUpdateFactory.newLatLngZoom(LatLng(lk.latitude, lk.longitude), preferredZoom)
-                )
-            }
-            // Ensure map controls avoid being obscured by HUD
-            view.post {
-                val bottom = view.findViewById<View>(R.id.bottom_bar).height + view.findViewById<View>(R.id.hazard_buttons_container).height + dp(24)
-                val top = (view.findViewById<View>(R.id.mute_chip).height + view.findViewById<View>(R.id.next_chip).height + dp(16)).coerceAtLeast(dp(16))
-                gMap.setPadding(dp(16), top, dp(16), bottom)
+            val night = (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+                android.content.res.Configuration.UI_MODE_NIGHT_YES
+            if (night) runCatching { gMap.setMapStyle(MapStyleOptions.loadRawResourceStyle(requireContext(), R.raw.map_style_night)) }
+
+            lastKnown()?.let { gMap.moveCamera(CameraUpdateFactory.newLatLngZoom(LatLng(it.latitude, it.longitude), preferredZoom)) }
+            gMap.setPadding(dp(12), dp(12), dp(12), dp(12))
+            gMap.setOnMarkerClickListener { marker ->
+                (marker.tag as? Hazard)?.let { openHazardEditor(it); true } ?: false
             }
             refreshMarkers()
+        }
+    }
 
-            // Open editor when a hazard marker is tapped
-            gMap.setOnMarkerClickListener { marker ->
-                val markerTag = marker.tag
-                if (markerTag is com.roadwatch.data.Hazard) {
-                    openHazardEditor(markerTag)
-                    true
-                } else {
-                    false
-                }
+    private fun setupControls(view: View) {
+        val ctx = requireContext()
+
+        view.findViewById<MaterialButton>(R.id.btn_stop).setOnClickListener { stopDrive() }
+        view.findViewById<MaterialButton>(R.id.btn_mute).setOnClickListener {
+            if (AppPrefs.isMuted(ctx)) AppPrefs.clearMute(ctx) else AppPrefs.setMutedForMinutes(ctx, AppPrefs.getDefaultMuteMinutes(ctx))
+            updateMuteUi(view)
+        }
+
+        val dirToggle = view.findViewById<MaterialButtonToggleGroup>(R.id.toggle_report_dir)
+        fun updateScope(both: Boolean) {
+            view.findViewById<TextView>(R.id.txt_report_scope).setText(
+                if (both) R.string.report_scope_both else R.string.report_scope_one,
+            )
+        }
+        dirToggle.check(if (AppPrefs.getReportDirectionality(ctx) == "BIDIRECTIONAL") R.id.btn_dir_both else R.id.btn_dir_one)
+        updateScope(dirToggle.checkedButtonId == R.id.btn_dir_both)
+        dirToggle.addOnButtonCheckedListener { _, id, checked ->
+            if (checked) {
+                val both = id == R.id.btn_dir_both
+                AppPrefs.setReportDirectionality(ctx, if (both) "BIDIRECTIONAL" else "ONE_WAY")
+                updateScope(both)
+                view.findViewById<TextView>(R.id.txt_report_scope).announceForAccessibility(
+                    getString(if (both) R.string.report_scope_both else R.string.report_scope_one),
+                )
             }
         }
 
-        // Controls
-        val btnStop = view.findViewById<Button>(R.id.btn_stop)
-        txtSpeed = view.findViewById(R.id.txt_speed_value)
-        txtBearing = view.findViewById(R.id.txt_bearing_value)
-        if (baseSpeedTextSizePx == 0f) {
-            baseSpeedTextSizePx = txtSpeed?.textSize ?: 0f
-        }
-        if (baseBearingTextSizePx == 0f) {
-            baseBearingTextSizePx = txtBearing?.textSize ?: 0f
-        }
-        val speedLabel = view.findViewById<android.widget.TextView>(R.id.txt_speed_label)
-        val subtitleView = view.findViewById<android.widget.TextView>(R.id.txt_next_subtitle)
-        val speedCardContent = view.findViewById<LinearLayout>(R.id.speed_card_content)
-        if (baseLabelTextSizePx == 0f) {
-            baseLabelTextSizePx = speedLabel?.textSize ?: 0f
-        }
-        if (baseSubtitleTextSizePx == 0f) {
-            baseSubtitleTextSizePx = subtitleView?.textSize ?: 0f
-        }
-        if (baseCardPaddingHorizontalPx == 0 && speedCardContent != null) {
-            baseCardPaddingHorizontalPx = speedCardContent.paddingStart
-            baseCardPaddingVerticalPx = speedCardContent.paddingTop
-        }
-
-        val btnReportBump = view.findViewById<com.google.android.material.button.MaterialButton>(R.id.btn_report_bump)
-        val btnReportPothole = view.findViewById<com.google.android.material.button.MaterialButton>(R.id.btn_report_pothole)
-        val btnReportRumble = view.findViewById<com.google.android.material.button.MaterialButton>(R.id.btn_report_rumble)
-        val btnReportZone = view.findViewById<com.google.android.material.button.MaterialButton>(R.id.btn_report_zone)
-
-        btnReportBump.setOnClickListener { DriverReportSheet.newInstance(HazardType.SPEED_BUMP).show(parentFragmentManager, "driver_report") }
-        btnReportPothole.setOnClickListener { DriverReportSheet.newInstance(HazardType.POTHOLE).show(parentFragmentManager, "driver_report") }
-        btnReportRumble.setOnClickListener { DriverReportSheet.newInstance(HazardType.RUMBLE_STRIP).show(parentFragmentManager, "driver_report") }
-        btnReportZone.setOnClickListener {
-            // The zone reporting still needs the sheet for start/end points
+        view.findViewById<View>(R.id.btn_report_bump).setOnClickListener { quickReport(HazardType.SPEED_BUMP) }
+        view.findViewById<View>(R.id.btn_report_pothole).setOnClickListener { quickReport(HazardType.POTHOLE) }
+        view.findViewById<View>(R.id.btn_report_rumble).setOnClickListener { quickReport(HazardType.RUMBLE_STRIP) }
+        // Zones need a start and end point, so they keep the sheet.
+        view.findViewById<View>(R.id.btn_report_zone).setOnClickListener {
             DriverReportSheet.newInstance(HazardType.SPEED_LIMIT_ZONE).show(parentFragmentManager, "driver_report")
         }
 
-        btnStop.setOnClickListener {
-            (activity as? com.roadwatch.app.MainActivity)?.stopDriveMode()
-            parentFragmentManager.popBackStack()
+        view.findViewById<View>(R.id.btn_alert_wrong).setOnClickListener {
+            val id = DriveSession.state.lastAlert?.id ?: return@setOnClickListener
+            ctx.startService(
+                Intent(ctx, DriveModeService::class.java).setAction(DriveActions.FEEDBACK)
+                    .putExtra(DriveActions.EXTRA_ALERT_ID, id).putExtra(DriveActions.EXTRA_VERDICT, "WRONG"),
+            )
+            view.findViewById<View>(R.id.alert_overlay).visibility = View.GONE
         }
-        // Passenger reporting removed for MVP; unified driver sheet used for all reporting.
+        updateSpeedCardStyle(null)
+    }
 
-        // Start foreground service when HUD opens
-        val intent = com.roadwatch.core.location.DriveModeService.createStartIntent(requireContext())
-        requireContext().startForegroundService(intent)
+    // ---- observing the session --------------------------------------------------------------
 
-        // Muted-until chip
-        val chip = view.findViewById<com.google.android.material.card.MaterialCardView>(R.id.mute_chip)
-        val chipText = view.findViewById<android.widget.TextView>(R.id.txt_muted_until)
-        if (AppPrefs.isMuted(requireContext())) {
+    private fun render(s: DriveSession.State) {
+        val v = view ?: return
+        if (s.running) sawRunning = true
+        if (sawRunning && !s.running) {
+            // Stopped from the notification, by auto-stop, or an error.
+            if (isAdded) parentFragmentManager.popBackStack()
+            return
+        }
+
+        val fix = s.fix
+        val kph = fix?.let { AlertText.kph(it.speedMps) } ?: 0
+        v.findViewById<TextView>(R.id.txt_speed_value).apply {
+            text = kph.toString()
+            textSize = 48f
+        }
+        v.findViewById<TextView>(R.id.txt_bearing_value).text = s.courseDeg?.let { Geo.compass(it) } ?: "–"
+
+        val next = s.upcoming.firstOrNull()
+        val chip = v.findViewById<MaterialCardView>(R.id.next_chip)
+        val subtitle = v.findViewById<TextView>(R.id.txt_next_subtitle)
+        if (next != null) {
+            val name = AlertText.capitalized(AlertText.name(next.hazard.type))
+            v.findViewById<TextView>(R.id.txt_next_hazard).text = "$name in ${AlertText.shortDistance(next.alongM.toInt())}"
             chip.visibility = View.VISIBLE
-            val until = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(AppPrefs.getMutedUntilMillis(requireContext())))
-            chipText.text = "Muted until $until"
+            subtitle.text = if (s.night) "Night: earlier warnings on" else ""
         } else {
             chip.visibility = View.GONE
+            subtitle.text = if (s.night) "Night: earlier warnings on" else ""
+        }
+        updateSpeedCardStyle(next?.alongM)
+
+        s.lastAlert?.let { a ->
+            if (a.id != lastShownAlertId) {
+                lastShownAlertId = a.id
+                showAlertCard(v, a.title, a.subtitle)
+            }
         }
 
-        // Initialize idle tracking baseline
-        view.post {
-            lastBaselineLoc = lastKnown()
-            val now = System.currentTimeMillis()
-            lastBaselineTime = now
-            lastMoveTime = now
+        val loc = s.location
+        if (loc != null && !s.simulated) {
+            googleMap?.animateCamera(
+                CameraUpdateFactory.newCameraPosition(
+                    CameraPosition.Builder().target(LatLng(loc.latitude, loc.longitude)).zoom(preferredZoom)
+                        .bearing(s.courseDeg?.toFloat() ?: loc.bearing).tilt(45f).build(),
+                ),
+            )
         }
-
-        // Default the speed card to neutral styling until the first hazard evaluation runs.
-        updateSpeedCardStyle(null)
-
-        // Prompt for DND bypass so alerts can play in Silent/DND
-        ensureDndAccessPrompt()
     }
 
-    private fun enableMyLocation() {
-        if (!hasFinePermission()) {
-            requestPermissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION))
+    private fun showAlertCard(v: View, title: String, subtitle: String) {
+        val card = v.findViewById<MaterialCardView>(R.id.alert_overlay)
+        card.setCardBackgroundColor(ContextCompat.getColor(v.context, R.color.alert_warn))
+        v.findViewById<TextView>(R.id.alert_text).text = if (subtitle.isBlank()) title else "$title • $subtitle"
+        card.visibility = View.VISIBLE
+        handler.removeCallbacks(hideAlertCard)
+        handler.postDelayed(hideAlertCard, 8_000L)
+    }
+
+    private fun updateSpeedCardStyle(alongM: Double?) {
+        val card = view?.findViewById<MaterialCardView>(R.id.speed_card) ?: return
+        val ctx = card.context
+        val (bg, fg, stroke) = when {
+            alongM == null || alongM > CAUTION_DISTANCE_M -> Triple(R.color.surface, R.color.on_surface, R.color.outline)
+            alongM > WARN_DISTANCE_M -> Triple(R.color.primary_container, R.color.on_primary_container, R.color.primary)
+            else -> Triple(R.color.hazard_warn_background, R.color.hazard_warn_on_background, R.color.hazard_warn_stroke)
+        }
+        card.setCardBackgroundColor(ContextCompat.getColor(ctx, bg))
+        val neutral = alongM == null || alongM > CAUTION_DISTANCE_M
+        card.strokeWidth = if (neutral) 0 else dp(2)
+        card.setStrokeColor(ContextCompat.getColor(ctx, stroke))
+        val fgColor = ContextCompat.getColor(ctx, fg)
+        listOf(R.id.txt_speed_value, R.id.txt_bearing_value, R.id.txt_speed_label, R.id.txt_direction_label, R.id.txt_next_subtitle)
+            .forEach { id -> view?.findViewById<TextView>(id)?.setTextColor(fgColor) }
+    }
+
+    private fun updateMuteUi(view: View) {
+        val ctx = requireContext()
+        val chip = view.findViewById<MaterialCardView>(R.id.mute_chip)
+        val btn = view.findViewById<MaterialButton>(R.id.btn_mute)
+        if (AppPrefs.isMuted(ctx)) {
+            val until = java.text.SimpleDateFormat("HH:mm", Locale.getDefault()).format(java.util.Date(AppPrefs.getMutedUntilMillis(ctx)))
+            view.findViewById<TextView>(R.id.txt_muted_until).text = "Muted until $until"
+            chip.visibility = View.VISIBLE
+            btn.text = getString(R.string.unmute)
+        } else {
+            chip.visibility = View.GONE
+            btn.text = getString(R.string.mute_alerts_short)
+        }
+    }
+
+    // ---- reporting ---------------------------------------------------------------------------
+
+    private fun quickReport(type: HazardType) {
+        val ctx = requireContext()
+        val outcome = ReportActions.report(ctx, type)
+        val r = outcome.result
+        if (!outcome.ok || r == null) {
+            UiAlerts.error(view, outcome.message)
             return
         }
-        googleMap?.isMyLocationEnabled = true
-        startLocationUpdates()
-    }
-
-    private fun hasFinePermission(): Boolean {
-        return ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-    }
-
-    private fun startLocationUpdates() {
-        if (lm == null) lm = requireContext().getSystemService(android.content.Context.LOCATION_SERVICE) as LocationManager
-        try {
-            lm?.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1500L, 2f, locListener, Looper.getMainLooper())
-            lm?.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 3000L, 5f, locListener, Looper.getMainLooper())
-        } catch (_: SecurityException) {}
-    }
-
-    private fun stopLocationUpdates() {
-        try { lm?.removeUpdates(locListener) } catch (_: Exception) {}
-    }
-
-    override fun onDestroyView() {
-        super.onDestroyView()
-        stopLocationUpdates()
-        googleMap = null
-        txtSpeed = null
-        txtBearing = null
-    }
-
-    override fun onResume() {
-        super.onResume()
-        // Keep screen on during drive
-        activity?.window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        // Start provider checks
-        view?.postDelayed(checkProvidersRunnable, 10_000L)
-
-        // Also listen for provider changes (user toggles Location in quick settings)
-        if (providersReceiver == null) {
-            providersReceiver = object : BroadcastReceiver() {
-                override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
-                    val lmLocal = requireContext().getSystemService(android.content.Context.LOCATION_SERVICE) as LocationManager
-                    val enabled = lmLocal.isProviderEnabled(LocationManager.GPS_PROVIDER) || lmLocal.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
-                    val hasFine = hasFinePermission()
-                    if (!enabled || !hasFine) {
-                        stopDriveService()
-                        closeOverlaysAndExit()
-                    }
+        refreshMarkers()
+        val bar = Snackbar.make(requireView(), outcome.message, 6_000)
+        if (r.saved != null && r.result != SeedRepository.AddResult.DUPLICATE_NEARBY) {
+            bar.setAction("UNDO") {
+                if (SeedRepository(ctx).undo(r)) {
+                    refreshMarkers()
+                    Toast.makeText(ctx, "Report removed", Toast.LENGTH_SHORT).show()
                 }
             }
-            requireContext().registerReceiver(providersReceiver, IntentFilter(LocationManager.PROVIDERS_CHANGED_ACTION))
         }
-
-        // Listen for hazard overlay broadcasts
-        if (overlayReceiver == null) {
-            overlayReceiver = object : BroadcastReceiver() {
-                override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
-                    when (intent?.action) {
-                        "com.roadwatch.ALERT_OVERLAY" -> {
-                            // Audio cues already inform the driver; suppress duplicate popup UI.
-                            view?.findViewById<com.google.android.material.card.MaterialCardView>(R.id.alert_overlay)?.visibility = View.GONE
-                        }
-                        "com.roadwatch.REFRESH_HAZARDS" -> refreshMarkers()
-                    }
-                }
-            }
-            val filter = IntentFilter().apply {
-                addAction("com.roadwatch.ALERT_OVERLAY")
-                addAction("com.roadwatch.REFRESH_HAZARDS")
-            }
-            requireContext().registerReceiver(overlayReceiver, filter)
-        }
+        bar.setAnchorView(R.id.hazard_buttons_container)
+        bar.show()
     }
 
-    override fun onPause() {
-        super.onPause()
-        activity?.window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        view?.removeCallbacks(checkProvidersRunnable)
-        try { requireContext().unregisterReceiver(providersReceiver) } catch (_: Exception) {}
-        providersReceiver = null
-        try { requireContext().unregisterReceiver(overlayReceiver) } catch (_: Exception) {}
-        overlayReceiver = null
+    // ---- lifecycle helpers -------------------------------------------------------------------
+
+    private fun startServiceIfReady() {
+        if (DriveSession.state.running || !isAdded || !hasFinePermission()) return
+        requireContext().startForegroundService(DriveModeService.createStartIntent(requireContext()))
     }
 
-    companion object {
-        private const val MIN_HEADING_AGREE_DEG = 15.0
-        private const val ONE_WAY_MAX_HEADING_DEG = 10.0
-        private const val MAX_LATERAL_OFFSET_METERS = 7.0
-        private const val WARN_DISTANCE_METERS = 75.0
-        private const val CAUTION_DISTANCE_METERS = 200.0
-        private const val PRIORITY_SUPERSEDE_DISTANCE_METERS = 80.0
-        private const val HAZARD_LINGER_METERS = 35.0
-        private const val MIN_MAP_ZOOM = 15.0f
-        private const val MAX_MAP_ZOOM = 20.0f
-        private const val DEFAULT_MAP_ZOOM = 18.5f
-    }
-
-    private fun vectorToBitmapDescriptor(resId: Int, scale: Float = 1.0f): BitmapDescriptor {
-        val drawable = ResourcesCompat.getDrawable(resources, resId, null) ?: return BitmapDescriptorFactory.defaultMarker()
-        val baseW = drawable.intrinsicWidth.takeIf { it > 0 } ?: 48
-        val baseH = drawable.intrinsicHeight.takeIf { it > 0 } ?: 48
-        val width = (baseW * scale).toInt().coerceAtLeast(24)
-        val height = (baseH * scale).toInt().coerceAtLeast(24)
-        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bitmap)
-        drawable.setBounds(0, 0, canvas.width, canvas.height)
-        drawable.draw(canvas)
-        return BitmapDescriptorFactory.fromBitmap(bitmap)
-    }
-
-    private fun getVotesFor(h: com.roadwatch.data.Hazard): Int {
-        val key = com.roadwatch.data.SeedOverrides.keyOf(h)
-        return com.roadwatch.data.CommunityVotes.getVotes(requireContext(), key)
-    }
-
-    private fun dp(v: Int): Int = (resources.displayMetrics.density * v).toInt()
-
-    private fun lastKnown(): android.location.Location? {
-        val lm = requireContext().getSystemService(android.content.Context.LOCATION_SERVICE) as android.location.LocationManager
-        val providers = lm.getProviders(true)
-        var best: android.location.Location? = null
-        for (p in providers) {
-            val l = lm.getLastKnownLocation(p) ?: continue
-            if (best == null || l.accuracy < best.accuracy) best = l
-        }
-        return best
-    }
-
-    private fun clampZoom(value: Float): Float = value.coerceIn(MIN_MAP_ZOOM, MAX_MAP_ZOOM)
-
-    // Removed legacy quick picker dialog and GPS one-off fix helpers to keep code lean.
-
-    private val checkProvidersRunnable = object : Runnable {
-        override fun run() {
-            try {
-                val lmLocal = requireContext().getSystemService(android.content.Context.LOCATION_SERVICE) as LocationManager
-                val enabled = lmLocal.isProviderEnabled(LocationManager.GPS_PROVIDER) || lmLocal.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
-                if (!enabled) {
-                    Toast.makeText(requireContext(), "Location turned off. Stopping Drive Mode.", Toast.LENGTH_SHORT).show()
-                    stopDriveService()
-                    closeOverlaysAndExit()
-                    return
-                }
-                if (!hasFinePermission()) {
-                    Toast.makeText(requireContext(), "Location permission revoked. Stopping Drive Mode.", Toast.LENGTH_SHORT).show()
-                    stopDriveService()
-                    closeOverlaysAndExit()
-                    return
-                }
-            } catch (_: Exception) {}
-            view?.postDelayed(this, 10_000L)
-        }
-    }
-
-    private fun evaluateIdleStop(location: Location) {
-        val now = System.currentTimeMillis()
-        val base = lastBaselineLoc
-        if (base == null) {
-            lastBaselineLoc = location
-            lastBaselineTime = now
-            lastMoveTime = now
-            return
-        }
-        val dist = distanceMeters(base.latitude, base.longitude, location.latitude, location.longitude)
-        if (dist >= idleDistanceMeters) {
-            // Significant movement: reset baseline and move time
-            lastBaselineLoc = location
-            lastBaselineTime = now
-            lastMoveTime = now
-            return
-        }
-        // Some movement without crossing threshold
-        if (dist > 10.0) lastMoveTime = now
-        val sinceBaseline = now - lastBaselineTime
-        if (sinceBaseline >= idleTimeoutMs) {
-            Toast.makeText(requireContext(), "No movement detected. Stopping Drive Mode.", Toast.LENGTH_SHORT).show()
-            try { com.roadwatch.prefs.AppPrefs.recordAutoStop(requireContext(), location.latitude, location.longitude) } catch (_: Exception) {}
-            stopDriveService()
-            parentFragmentManager.popBackStack()
-        }
-    }
-
-    private fun stopDriveService() {
-        try {
-            val intent = com.roadwatch.core.location.DriveModeService.createStopIntent(requireContext())
-            requireContext().startService(intent)
-        } catch (_: Exception) {}
-    }
-
-    private fun closeOverlaysAndExit() {
-        try {
-            // Dismiss any open bottom sheets/fragments hosted by this fragment
-            childFragmentManager.fragments.forEach { f ->
-                if (f is com.google.android.material.bottomsheet.BottomSheetDialogFragment) {
-                    try { f.dismissAllowingStateLoss() } catch (_: Exception) {}
-                }
-            }
-        } catch (_: Exception) {}
+    private fun stopDrive() {
+        requireContext().startService(DriveModeService.createStopIntent(requireContext()))
         parentFragmentManager.popBackStack()
     }
 
-    // --- Prerequisites: notifications allowed, location permission, location services on ---
-    private fun ensurePrerequisitesOrExit() {
-        // Notifications
-        if (!NotificationManagerCompat.from(requireContext()).areNotificationsEnabled()) {
-            // On Android 13+, request POST_NOTIFICATIONS; otherwise guide to settings
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-                requestPermissionLauncher.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
-            } else {
-                android.app.AlertDialog.Builder(requireContext())
-                    .setTitle("Enable notifications")
-                    .setMessage("Notifications are required for Drive Mode alerts.")
-                    .setPositiveButton("Open Settings") { _, _ ->
-                        startActivity(android.content.Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
-                            putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, requireContext().packageName)
-                        })
-                    }
-                    .setNegativeButton("Cancel") { _, _ -> parentFragmentManager.popBackStack() }
-                    .show()
-            }
+    private fun ensurePermissions() {
+        val need = ArrayList<String>()
+        if (!hasFinePermission()) need += Manifest.permission.ACCESS_FINE_LOCATION
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !NotificationManagerCompat.from(requireContext()).areNotificationsEnabled()) {
+            need += Manifest.permission.POST_NOTIFICATIONS
         }
+        if (need.isNotEmpty()) permissionLauncher.launch(need.toTypedArray())
 
-        // Location services enabled
-        val lmLocal = requireContext().getSystemService(android.content.Context.LOCATION_SERVICE) as LocationManager
-        val enabled = lmLocal.isProviderEnabled(LocationManager.GPS_PROVIDER) || lmLocal.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
-        if (!enabled) {
-            android.app.AlertDialog.Builder(requireContext())
-                .setTitle("Enable Location Services")
-                .setMessage("Turn on location (GPS or network) to use Drive Mode.")
-                .setPositiveButton("Open Settings") { _, _ -> startActivity(android.content.Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS)) }
+        val lm = requireContext().getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        if (!lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+            AlertDialog.Builder(requireContext())
+                .setTitle("Turn on Location")
+                .setMessage("Drive Mode needs GPS to know where hazards are.")
+                .setPositiveButton("Open Settings") { _, _ -> startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)) }
                 .setNegativeButton("Cancel") { _, _ -> parentFragmentManager.popBackStack() }
                 .show()
         }
     }
 
-    private fun ensureDndAccessPrompt() {
-        // Gate the prompt: only if notifications are disabled or alerts channel has low importance and we haven't prompted recently
+    /** Offer the "Display over other apps" permission (once every few days) so alerts show above Maps/Waze. */
+    private fun maybePromptOverlayPermission() {
         val ctx = requireContext()
-        val nm = ctx.getSystemService(android.content.Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
-        val channelsOk = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-            val ch = nm.getNotificationChannel(com.roadwatch.notifications.NotificationHelper.CHANNEL_ALERTS)
-            ch != null && ch.importance >= android.app.NotificationManager.IMPORTANCE_HIGH
-        } else true
-        val enabled = androidx.core.app.NotificationManagerCompat.from(ctx).areNotificationsEnabled()
-        val needsPrompt = !(enabled && channelsOk)
-
-        // Throttle: no more than once per 24h
-        val last = com.roadwatch.prefs.AppPrefs.getLastDndPromptAt(ctx)
-        if (!needsPrompt || (System.currentTimeMillis() - last) < 24 * 60 * 60 * 1000L) return
-
-        com.roadwatch.prefs.AppPrefs.setLastDndPromptAt(ctx)
-        com.roadwatch.notifications.NotificationHelper.ensureChannels(ctx)
-
-        val builder = android.app.AlertDialog.Builder(ctx)
-            .setTitle("Allow critical alerts")
-            .setMessage("To play alerts in Silent/DND, allow DND and set Alerts channel to High.")
-            .setPositiveButton("DND Settings") { _, _ ->
-                val intent = android.content.Intent("android.settings.ZEN_MODE_SETTINGS")
-                try { startActivity(intent) } catch (_: Exception) {}
+        if (!AppPrefs.isOverlayEnabled(ctx) || Settings.canDrawOverlays(ctx)) return
+        val prefs = ctx.getSharedPreferences("roadwatch_prompts", Context.MODE_PRIVATE)
+        val last = prefs.getLong("overlay_prompt_at", 0L)
+        if (System.currentTimeMillis() - last < 3 * 24 * 3600_000L) return
+        prefs.edit().putLong("overlay_prompt_at", System.currentTimeMillis()).apply()
+        AlertDialog.Builder(ctx)
+            .setTitle("Show alerts over other apps?")
+            .setMessage("So you see hazard warnings on top of Google Maps, Waze or music apps without opening RoadWatch. Voice alerts work either way.")
+            .setPositiveButton("Allow") { _, _ ->
+                startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}")))
             }
-            .setNeutralButton("App Notification Settings") { _, _ ->
-                val intent = android.content.Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
-                    putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, ctx.packageName)
-                }
-                try { startActivity(intent) } catch (_: Exception) {}
-            }
-            .setNegativeButton("Later", null)
-        builder.show()
-    }
-    private fun updateHudFrom(location: Location) {
-        val speedKph = (location.speed * 3.6).toInt().coerceAtLeast(0)
-        txtSpeed?.text = speedKph.toString()
-        // Increase text size slightly with speed for glanceability
-        val sp = when {
-            speedKph >= 80 -> 56f
-            speedKph >= 50 -> 48f
-            else -> 40f
-        }
-        txtSpeed?.textSize = sp
-        txtBearing?.textSize = (sp - 12f).coerceAtLeast(28f)
-        val bearing = if (location.hasBearing()) location.bearing.toDouble() else Double.NaN
-        txtBearing?.text = if (bearing.isNaN()) "N" else degToCompass(bearing)
+            .setNegativeButton("Not now", null)
+            .show()
     }
 
-    private fun degToCompass(bearing: Double): String {
-        val dirs = arrayOf("N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW")
-        var b = bearing
-        while (b < 0) b += 360.0
-        val idx = ((b + 11.25) / 22.5).toInt() % 16
-        return dirs[idx]
+    private fun hasFinePermission(): Boolean =
+        ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+
+    @SuppressLint("MissingPermission")
+    private fun lastKnown(): android.location.Location? {
+        DriveSession.state.location?.let { return it }
+        if (!hasFinePermission()) return null
+        val lm = requireContext().getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        return lm.getProviders(true).mapNotNull { runCatching { lm.getLastKnownLocation(it) }.getOrNull() }.minByOrNull { it.accuracy }
     }
 
-    private fun updateNextHazardChip(location: Location) {
-        val chip = view?.findViewById<com.google.android.material.card.MaterialCardView>(R.id.next_chip)
-        val chipText = view?.findViewById<android.widget.TextView>(R.id.txt_next_hazard)
-        val subtitle = view?.findViewById<android.widget.TextView>(R.id.txt_next_subtitle)
-        if (chip == null || chipText == null) return
-        val hazards = SeedRepository(requireContext()).activeHazards()
-
-        // Require bearing to avoid false positives; hide when unknown or speed too low
-        if (!location.hasBearing() || location.speed < 1.0f) {
-            chip.visibility = View.GONE
-            subtitle?.text = ""
-            updateSpeedCardStyle(null)
-            return
-        }
-
-        val speedKph = location.speed * 3.6
-        val lead = leadDistanceMeters(speedKph)
-        val heading = Math.toRadians(location.bearing.toDouble())
-
-        val chipCandidates = mutableListOf<HazardCandidate>()
-        val styleCandidates = mutableListOf<HazardCandidate>()
-
-        hazards.forEach { h ->
-            val (tLat, tLng) = targetPoint(h)
-            val d = distanceMeters(location.latitude, location.longitude, tLat, tLng)
-            if (d > lead) return@forEach
-            val bTo = bearingRadians(location.latitude, location.longitude, tLat, tLng)
-            val headingDiffDeg = Math.toDegrees(kotlin.math.abs(angleDelta(heading, bTo)))
-            if (h.directionality == "ONE_WAY" && headingDiffDeg > ONE_WAY_MAX_HEADING_DEG) return@forEach
-            if (headingDiffDeg > MIN_HEADING_AGREE_DEG) return@forEach
-            val lateral = d * kotlin.math.sin(bTo - heading)
-            if (kotlin.math.abs(lateral) > MAX_LATERAL_OFFSET_METERS) return@forEach
-            val along = d * kotlin.math.cos(bTo - heading)
-            if (along < -HAZARD_LINGER_METERS) return@forEach
-            val priority = hazardPriority(h.type)
-            val candidate = HazardCandidate(h, along, d, priority)
-            styleCandidates += candidate
-            if (along > 0.0) {
-                chipCandidates += candidate
-            }
-        }
-
-        val bestAhead = selectBestCandidate(chipCandidates)
-        val bestStyle = bestAhead ?: selectBestCandidate(styleCandidates)
-
-        if (bestAhead != null) {
-            val type = bestAhead.hazard.type.name.replace('_',' ').lowercase().replaceFirstChar { it.uppercase() }
-            val text = "$type in ${formatNiceDistance(bestAhead.along)}"
-            chipText.text = text
-            chip.visibility = View.VISIBLE
-            subtitle?.text = "Next: ${type} • ${formatNiceDistance(bestAhead.distance)}"
-        } else {
-            chip.visibility = View.GONE
-            subtitle?.text = ""
-        }
-
-        updateSpeedCardStyle(bestStyle)
+    @SuppressLint("MissingPermission")
+    private fun showMyLocation() {
+        if (!hasFinePermission()) return
+        try { googleMap?.isMyLocationEnabled = true } catch (_: SecurityException) {}
     }
 
-    private fun updateSpeedCardStyle(candidate: HazardCandidate?) {
-        val card = view?.findViewById<com.google.android.material.card.MaterialCardView>(R.id.speed_card) ?: return
-        val ctx = card.context
-        val neutralBg = ContextCompat.getColor(ctx, R.color.surface)
-        val neutralFg = ContextCompat.getColor(ctx, R.color.on_surface)
-        val neutralStroke = ContextCompat.getColor(ctx, R.color.outline)
-        val cautionBg = ContextCompat.getColor(ctx, R.color.primary_container)
-        val cautionFg = ContextCompat.getColor(ctx, R.color.on_primary_container)
-        val cautionStroke = ContextCompat.getColor(ctx, R.color.primary)
-        val warnBg = ContextCompat.getColor(ctx, R.color.hazard_warn_background)
-        val warnFg = ContextCompat.getColor(ctx, R.color.hazard_warn_on_background)
-        val warnStroke = ContextCompat.getColor(ctx, R.color.hazard_warn_stroke)
+    private fun dp(v: Int): Int = (resources.displayMetrics.density * v).toInt()
 
-        val effectiveDistance = candidate?.effectiveAlong
-        val urgency = when {
-            effectiveDistance == null -> HazardUrgency.NEUTRAL
-            effectiveDistance <= WARN_DISTANCE_METERS -> HazardUrgency.WARN
-            effectiveDistance <= CAUTION_DISTANCE_METERS -> HazardUrgency.CAUTION
-            else -> HazardUrgency.NEUTRAL
-        }
+    // ---- map markers -------------------------------------------------------------------------
 
-        val bg: Int
-        val fg: Int
-        val stroke: Int
-        val subtitleColor: Int
-        when (urgency) {
-            HazardUrgency.WARN -> {
-                bg = warnBg
-                fg = warnFg
-                stroke = warnStroke
-                subtitleColor = warnFg
-            }
-            HazardUrgency.CAUTION -> {
-                bg = cautionBg
-                fg = cautionFg
-                stroke = cautionStroke
-                subtitleColor = cautionFg
-            }
-            HazardUrgency.NEUTRAL -> {
-                bg = neutralBg
-                fg = neutralFg
-                stroke = neutralStroke
-                subtitleColor = ContextCompat.getColor(ctx, R.color.on_surface_variant)
-            }
-        }
-
-        card.setCardBackgroundColor(bg)
-        card.strokeWidth = if (stroke == neutralStroke) 0 else dp(2)
-        card.setStrokeColor(stroke)
-
-        val subtitle = view?.findViewById<android.widget.TextView>(R.id.txt_next_subtitle)
-        subtitle?.setTextColor(subtitleColor)
-
-        val labels = listOfNotNull(
-            txtSpeed,
-            txtBearing,
-            view?.findViewById<android.widget.TextView>(R.id.txt_speed_label),
-            view?.findViewById<android.widget.TextView>(R.id.txt_direction_label)
-        )
-        labels.forEach { it.setTextColor(fg) }
-
-        if (baseSpeedTextSizePx > 0f) {
-            txtSpeed?.setTextSize(TypedValue.COMPLEX_UNIT_PX, baseSpeedTextSizePx)
-        }
-        if (baseBearingTextSizePx > 0f) {
-            txtBearing?.setTextSize(TypedValue.COMPLEX_UNIT_PX, baseBearingTextSizePx)
-        }
-        val speedLabel = view?.findViewById<android.widget.TextView>(R.id.txt_speed_label)
-        val directionLabel = view?.findViewById<android.widget.TextView>(R.id.txt_direction_label)
-        if (baseLabelTextSizePx > 0f) {
-            speedLabel?.setTextSize(TypedValue.COMPLEX_UNIT_PX, baseLabelTextSizePx)
-            directionLabel?.setTextSize(TypedValue.COMPLEX_UNIT_PX, baseLabelTextSizePx)
-        }
-        if (baseSubtitleTextSizePx > 0f) {
-            subtitle?.setTextSize(TypedValue.COMPLEX_UNIT_PX, baseSubtitleTextSizePx)
-        }
-        val content = view?.findViewById<LinearLayout>(R.id.speed_card_content)
-        if (content != null && baseCardPaddingHorizontalPx > 0) {
-            content.setPadding(
-                baseCardPaddingHorizontalPx,
-                baseCardPaddingVerticalPx,
-                baseCardPaddingHorizontalPx,
-                baseCardPaddingVerticalPx
-            )
-        }
-
-        card.animate().cancel()
-        card.scaleX = 1f
-        card.scaleY = 1f
-    }
-
-    private fun targetPoint(h: com.roadwatch.data.Hazard): Pair<Double, Double> {
-        return if (h.type.name == "SPEED_LIMIT_ZONE" && h.zoneStartLat != null && h.zoneStartLng != null) {
-            h.zoneStartLat to h.zoneStartLng
-        } else h.lat to h.lng
-    }
-
-    private fun bearingRadians(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
-        val phi1 = Math.toRadians(lat1)
-        val phi2 = Math.toRadians(lat2)
-        val dLon = Math.toRadians(lon2 - lon1)
-        val y = kotlin.math.sin(dLon) * kotlin.math.cos(phi2)
-        val x = kotlin.math.cos(phi1) * kotlin.math.sin(phi2) - kotlin.math.sin(phi1) * kotlin.math.cos(phi2) * kotlin.math.cos(dLon)
-        return kotlin.math.atan2(y, x)
-    }
-
-    private fun angleDelta(a: Double, b: Double): Double {
-        var d = (b - a + Math.PI) % (2 * Math.PI)
-        if (d < 0) d += 2 * Math.PI
-        return d - Math.PI
-    }
-
-    private fun leadDistanceMeters(speedKph: Double): Double {
-        return when {
-            speedKph <= 0 -> 150.0
-            speedKph <= 50 -> 150 + (speedKph / 50.0) * 150
-            speedKph <= 100 -> 300 + ((speedKph - 50) / 50.0) * 300
-            speedKph <= 120 -> 600 + ((speedKph - 100) / 20.0) * 200
-            else -> 900.0
-        }
-    }
-
-    private fun distanceMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
-        val R = 6371000.0
-        val dLat = Math.toRadians(lat2 - lat1)
-        val dLon = Math.toRadians(lon2 - lon1)
-        val sin1 = kotlin.math.sin(dLat / 2)
-        val sin2 = kotlin.math.sin(dLon / 2)
-        val a = sin1 * sin1 +
-                kotlin.math.cos(Math.toRadians(lat1)) * kotlin.math.cos(Math.toRadians(lat2)) *
-                sin2 * sin2
-        val c = 2 * kotlin.math.atan2(kotlin.math.sqrt(a), kotlin.math.sqrt(1.0 - a))
-        return R * c
-    }
-
-    private fun formatNiceDistance(meters: Double): String {
-        val m = meters.toInt()
-        return when {
-            m < 50 -> "<50 m"
-            m < 200 -> "${(m / 10) * 10} m"
-            m < 1000 -> "${(m / 50) * 50} m"
-            else -> String.format(java.util.Locale.US, "%.1f km", m / 1000.0)
-        }
-    }
     private fun refreshMarkers() {
         val map = googleMap ?: return
-        ioScope.launch {
-            val hazards = SeedRepository(requireContext()).activeHazards()
-            withContext(Dispatchers.Main) {
+        val ctx = context?.applicationContext ?: return
+        lastMarkerRefresh = System.currentTimeMillis()
+        val center = DriveSession.state.location
+        io.execute {
+            var hazards = SeedRepository(ctx).activeHazards()
+            if (hazards.size > MAX_MARKERS && center != null) {
+                hazards = hazards.filter { Geo.distanceMeters(center.latitude, center.longitude, it.lat, it.lng) < 10_000.0 }.take(MAX_MARKERS)
+            }
+            handler.post {
+                if (googleMap == null || !isAdded) return@post
                 map.clear()
-                if (hazards.isNotEmpty()) {
-                    val first = LatLng(hazards.first().lat, hazards.first().lng)
-                    if (firstFix) {
-                        val zoom = clampZoom(preferredZoom)
-                        if (abs(zoom - preferredZoom) > 0.01f) {
-                            preferredZoom = zoom
-                            AppPrefs.setDriveMapZoom(requireContext(), zoom)
-                        }
-                        map.moveCamera(CameraUpdateFactory.newLatLngZoom(first, preferredZoom))
+                hazards.forEach { h ->
+                    val res = when (h.type) {
+                        HazardType.RUMBLE_STRIP -> R.drawable.ic_marker_rumble
+                        HazardType.POTHOLE -> R.drawable.ic_marker_pothole
+                        else -> R.drawable.ic_marker_bump
                     }
-                }
-                hazards.take(500).forEach { h ->
-                    val iconRes = when (h.type) {
-                        com.roadwatch.data.HazardType.SPEED_BUMP -> com.roadwatch.app.R.drawable.ic_marker_bump
-                        com.roadwatch.data.HazardType.RUMBLE_STRIP -> com.roadwatch.app.R.drawable.ic_marker_rumble
-                        com.roadwatch.data.HazardType.POTHOLE -> com.roadwatch.app.R.drawable.ic_marker_pothole
-                        else -> com.roadwatch.app.R.drawable.ic_marker_bump
-                    }
-                    val scale = 1.0f + (getVotesFor(h) / 10.0f)
-                    val icon = vectorToBitmapDescriptor(iconRes, scale)
-                    val m = map.addMarker(
-                        MarkerOptions().position(LatLng(h.lat, h.lng)).title(h.type.name).icon(icon)
-                    )
-                    m?.tag = h
+                    val scale = 1.0f + (CommunityVotes.getVotes(requireContext(), SeedOverrides.keyOf(h)) / 10.0f)
+                    map.addMarker(MarkerOptions().position(LatLng(h.lat, h.lng)).title(h.type.name).icon(vectorToBitmap(res, scale)))?.tag = h
                 }
             }
         }
     }
 
-    private fun openHazardEditor(h: com.roadwatch.data.Hazard) {
-        val ctx = requireContext()
-        val store = com.roadwatch.data.HazardStore(ctx)
-        val key = com.roadwatch.data.SeedOverrides.keyOf(h)
-        val userMatch = store.list().find { com.roadwatch.data.SeedOverrides.keyOf(it.hazard) == key }
+    private val iconCache = HashMap<Pair<Int, Int>, BitmapDescriptor>()
 
-        // If it's a user hazard, jump straight into the edit dialog.
+    private fun vectorToBitmap(resId: Int, scale: Float): BitmapDescriptor {
+        val key = resId to (scale * 10).toInt()
+        return iconCache.getOrPut(key) {
+            val d = ResourcesCompat.getDrawable(resources, resId, null) ?: return BitmapDescriptorFactory.defaultMarker()
+            val w = ((d.intrinsicWidth.takeIf { it > 0 } ?: 48) * scale).toInt().coerceAtLeast(24)
+            val h = ((d.intrinsicHeight.takeIf { it > 0 } ?: 48) * scale).toInt().coerceAtLeast(24)
+            val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            d.setBounds(0, 0, w, h)
+            d.draw(Canvas(bmp))
+            BitmapDescriptorFactory.fromBitmap(bmp)
+        }
+    }
+
+    // ---- hazard editor (tap a marker) --------------------------------------------------------
+
+    private fun openHazardEditor(h: Hazard) {
+        if ((DriveSession.state.fix?.speedMps ?: 0f) > 2.5f) {
+            UiAlerts.warn(view, "Park safely before editing a hazard")
+            return
+        }
+        val ctx = requireContext()
+        val store = HazardStore(ctx)
+        val key = SeedOverrides.keyOf(h)
+        val userMatch = store.list().find { SeedOverrides.keyOf(it.hazard) == key }
         if (userMatch != null) {
             showEditDialog(userMatch)
             return
         }
-
-        // For seed hazards, provide quick edit affordances: hide/show or create an editable copy.
-        val isActive = h.active && !com.roadwatch.data.SeedOverrides.isDisabled(ctx, key)
-        val toggleLabel = if (isActive) "Hide (Mark Inactive)" else "Show (Mark Active)"
-        val niceType = h.type.name.lowercase().replace('_',' ').replaceFirstChar { it.uppercase() }
-
-        android.app.AlertDialog.Builder(ctx)
-            .setTitle("Manage: $niceType")
-            .setMessage(
-                "This is a seed hazard. You can hide/show it, or make an editable copy to change type or move the pin."
-            )
-            .setPositiveButton(toggleLabel) { _, _ ->
-                com.roadwatch.data.SeedOverrides.setDisabled(ctx, key, isActive)
-                notifyRefresh()
-            }
-            .setNeutralButton("Make Editable Copy") { _, _ ->
-                val created = createEditableCopyFromSeed(h)
-                if (created != null) {
-                    showEditDialog(created)
-                } else {
-                    com.roadwatch.ui.UiAlerts.error(view, "Could not create editable copy")
-                }
+        val isActive = h.active && !SeedOverrides.isDisabled(ctx, key)
+        AlertDialog.Builder(ctx)
+            .setTitle("Manage: ${AlertText.capitalized(AlertText.name(h.type))}")
+            .setMessage("This hazard comes from legacy seed data. You can hide/show it.")
+            .setPositiveButton(if (isActive) "Hide (Mark Inactive)" else "Show (Mark Active)") { _, _ ->
+                SeedOverrides.setDisabled(ctx, key, isActive)
+                DriveSession.engine?.setHazards(SeedRepository(ctx).activeHazards())
+                refreshMarkers()
             }
             .setNegativeButton("Cancel", null)
             .show()
     }
 
-    private fun createEditableCopyFromSeed(h: com.roadwatch.data.Hazard): com.roadwatch.data.UserHazard? {
+    private fun showEditDialog(u: UserHazard) {
         val ctx = requireContext()
-        val store = com.roadwatch.data.HazardStore(ctx)
-        val copy = com.roadwatch.data.Hazard(
-            type = h.type,
-            lat = h.lat,
-            lng = h.lng,
-            directionality = when (h.directionality.uppercase()) {
-                "BIDIRECTIONAL" -> "BIDIRECTIONAL"
-                else -> "ONE_WAY"
-            },
-            reportedHeadingDeg = 0.0f,
-            userBearing = null,
-            active = true,
-            source = "USER",
-            createdAt = java.time.Instant.now(),
-            speedLimitKph = h.speedLimitKph,
-            zoneLengthMeters = h.zoneLengthMeters,
-            zoneStartLat = h.zoneStartLat,
-            zoneStartLng = h.zoneStartLng,
-            zoneEndLat = h.zoneEndLat,
-            zoneEndLng = h.zoneEndLng,
-        )
-        return if (store.add(copy)) {
-            // Find the newly added user hazard by matching key and source
-            val key = com.roadwatch.data.SeedOverrides.keyOf(copy)
-            store.list().find { it.hazard.source == "USER" && com.roadwatch.data.SeedOverrides.keyOf(it.hazard) == key }
-        } else null
+        val store = HazardStore(ctx)
+        val dialogView = layoutInflater.inflate(R.layout.dialog_edit_hazard, null)
+        val radioGroup = dialogView.findViewById<RadioGroup>(R.id.radio_group_directionality)
+        val spinner = dialogView.findViewById<Spinner>(R.id.spinner_hazard_type)
+        val quickLabel = dialogView.findViewById<TextView>(R.id.txt_quick_actions)
+        val btnOpposite = dialogView.findViewById<MaterialButton>(R.id.btn_quick_opposite_lane)
+        val btnDelete = dialogView.findViewById<MaterialButton>(R.id.btn_delete_hazard)
+        val heading = dialogView.findViewById<android.widget.EditText>(R.id.edt_hazard_heading)
+        heading.setText(if (u.hazard.headingKnown) u.hazard.reportedHeadingDeg.toString() else "")
+
+        val types = HazardType.values().filter { it != HazardType.SPEED_LIMIT_ZONE }.map { it.name }
+        spinner.adapter = ArrayAdapter(ctx, android.R.layout.simple_spinner_dropdown_item, types)
+        spinner.setSelection(types.indexOf(u.hazard.type.name).coerceAtLeast(0))
+        radioGroup.check(if (u.hazard.directionality == "BIDIRECTIONAL") R.id.radio_two_way else R.id.radio_one_way)
+
+        val dialog = AlertDialog.Builder(ctx)
+            .setView(dialogView)
+            .setPositiveButton("Save", null)
+            .setNeutralButton("Move Pin") { _, _ -> startMovePin(u) }
+            .setNegativeButton("Cancel", null)
+            .create()
+
+        // Pilot phase: every tester can remove a wrong hazard; deletions are logged and undoable.
+        btnDelete?.visibility = View.VISIBLE
+        btnDelete?.setOnClickListener { confirmDelete(u) { dialog.dismiss() } }
+        if (BuildConfig.IS_ADMIN) {
+            quickLabel?.visibility = View.VISIBLE
+            btnOpposite?.visibility = View.VISIBLE
+            btnOpposite?.setOnClickListener {
+                // Flip to the opposite carriageway: reverse the reported heading, then let the admin re-place the pin.
+                if (!u.hazard.headingKnown) {
+                    UiAlerts.error(view, "Set a known heading before reversing it")
+                    return@setOnClickListener
+                }
+                val flipped = (u.hazard.reportedHeadingDeg + 180f) % 360f
+                val ok = store.update(u.id) { it.copy(directionality = "ONE_WAY", reportedHeadingDeg = flipped, userBearing = flipped, headingValid = true, schemaVersion = 2) }
+                if (ok) {
+                    dialog.dismiss()
+                    refreshMarkers()
+                    startMovePin(u.copy(hazard = u.hazard.copy(reportedHeadingDeg = flipped)), getString(R.string.move_pin_opposite_prompt))
+                } else UiAlerts.error(view, "Update failed")
+            }
+        }
+        dialog.show()
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            val value = heading.text.toString().trim()
+            val bearing = value.toFloatOrNull()
+            if (bearing == null || !bearing.isFinite() || bearing < 0f || bearing >= 360f) {
+                heading.error = "Enter the applicable travel heading, from 0 to less than 360"
+                return@setOnClickListener
+            }
+            val dir = if (radioGroup.checkedRadioButtonId == R.id.radio_two_way) "BIDIRECTIONAL" else "ONE_WAY"
+            val type = HazardType.valueOf(spinner.selectedItem as String)
+            if (store.update(u.id) { it.copy(
+                    directionality = dir, type = type, reportedHeadingDeg = bearing,
+                    headingValid = true, schemaVersion = 2,
+                ) }) {
+                refreshMarkers()
+                UiAlerts.success(view, "Hazard updated")
+                dialog.dismiss()
+            } else UiAlerts.error(view, "Update failed")
+        }
     }
 
-    private fun showEditDialog(u: com.roadwatch.data.UserHazard) {
+    private fun confirmDelete(u: UserHazard, onDeleted: () -> Unit) {
         val ctx = requireContext()
-        val store = com.roadwatch.data.HazardStore(ctx)
-        val dialogView = layoutInflater.inflate(com.roadwatch.app.R.layout.dialog_edit_hazard, null)
-        val radioGroup = dialogView.findViewById<android.widget.RadioGroup>(com.roadwatch.app.R.id.radio_group_directionality)
-        val spinner = dialogView.findViewById<android.widget.Spinner>(com.roadwatch.app.R.id.spinner_hazard_type)
-        val quickLabel = dialogView.findViewById<android.widget.TextView>(com.roadwatch.app.R.id.txt_quick_actions)
-        val btnOppositeLane = dialogView.findViewById<com.google.android.material.button.MaterialButton>(com.roadwatch.app.R.id.btn_quick_opposite_lane)
-        val btnDelete = dialogView.findViewById<com.google.android.material.button.MaterialButton>(com.roadwatch.app.R.id.btn_delete_hazard)
-
-        val hazardTypes = com.roadwatch.data.HazardType.values()
-            .filter { it != com.roadwatch.data.HazardType.SPEED_LIMIT_ZONE }
-            .map { it.name }
-        val adapter = android.widget.ArrayAdapter(ctx, android.R.layout.simple_spinner_dropdown_item, hazardTypes)
-        spinner.adapter = adapter
-
-        spinner.setSelection(hazardTypes.indexOf(u.hazard.type.name))
-        when (u.hazard.directionality) {
-            "ONE_WAY" -> radioGroup.check(com.roadwatch.app.R.id.radio_one_way)
-            "BIDIRECTIONAL" -> radioGroup.check(com.roadwatch.app.R.id.radio_two_way)
-            else -> radioGroup.check(com.roadwatch.app.R.id.radio_one_way)
-        }
-
-        fun normalizeBearing(value: Float): Float {
-            var v = value % 360f
-            if (v < 0f) v += 360f
-            return v
-        }
-
-        val builder = android.app.AlertDialog.Builder(ctx)
-            .setView(dialogView)
-            .setPositiveButton("Save") { _, _ ->
-                val newDirectionality = when (radioGroup.checkedRadioButtonId) {
-                    com.roadwatch.app.R.id.radio_one_way -> "ONE_WAY"
-                    com.roadwatch.app.R.id.radio_two_way -> "BIDIRECTIONAL"
-                    else -> u.hazard.directionality
+        val name = AlertText.capitalized(AlertText.name(u.hazard.type))
+        AlertDialog.Builder(ctx)
+            .setTitle("Delete this $name?")
+            .setMessage("It will stop alerting immediately on this phone. You can undo for a few seconds.")
+            .setPositiveButton("Delete") { _, _ ->
+                if (!HazardStore(ctx).delete(u.id)) {
+                    UiAlerts.error(view, "Delete failed")
+                    return@setPositiveButton
                 }
-                val newType = com.roadwatch.data.HazardType.valueOf(spinner.selectedItem as String)
-                val updated = u.hazard.copy(directionality = newDirectionality, type = newType)
-                val originalKey = com.roadwatch.data.SeedOverrides.keyOf(u.hazard)
-                if (store.upsertByKey(originalKey, updated)) {
-                    notifyRefresh()
-                    refreshMarkers()
-                    com.roadwatch.ui.UiAlerts.success(view, "Hazard updated")
-                } else {
-                    com.roadwatch.ui.UiAlerts.error(view, "Update failed")
-                }
-            }
-            .setNeutralButton("Move Pin") { _, _ ->
-                startMovePin(u)
+                val h = u.hazard
+                DriveSession.tripLog?.custom(
+                    "edit",
+                    mapOf(
+                        "t" to System.currentTimeMillis(), "action" to "DELETE", "id" to u.id, "type" to h.type.name,
+                        "lat" to h.lat, "lng" to h.lng, "dir" to h.directionality,
+                        "hdg" to if (h.headingKnown) h.reportedHeadingDeg else null, "source" to h.source,
+                    ),
+                )
+                onDeleted()
+                refreshMarkers()
+                val root = view ?: return@setPositiveButton
+                Snackbar.make(root, "$name deleted", 8_000).setAction("UNDO") {
+                    if (HazardStore(ctx).restore(u)) {
+                        DriveSession.tripLog?.custom("edit", mapOf("t" to System.currentTimeMillis(), "action" to "UNDO_DELETE", "id" to u.id))
+                        refreshMarkers()
+                    } else UiAlerts.error(view, "Could not restore")
+                }.show()
             }
             .setNegativeButton("Cancel", null)
-
-        val dialog = builder.create()
-
-        if (com.roadwatch.app.BuildConfig.IS_ADMIN) {
-            quickLabel?.visibility = View.VISIBLE
-            btnOppositeLane?.visibility = View.VISIBLE
-            btnDelete?.visibility = View.VISIBLE
-
-            btnOppositeLane?.setOnClickListener {
-                val loc = com.roadwatch.core.location.DriveModeService.lastKnownLocation
-                val baseHeading = when {
-                    loc != null && loc.hasBearing() -> loc.bearing
-                    else -> u.hazard.reportedHeadingDeg
-                }
-                val opposite = normalizeBearing(baseHeading + 180f)
-                val newDirectionality = when (u.hazard.directionality.uppercase(Locale.US)) {
-                    "BIDIRECTIONAL" -> "ONE_WAY"
-                    "ONE_WAY" -> "ONE_WAY"
-                    else -> "ONE_WAY"
-                }
-                val updated = u.hazard.copy(
-                    directionality = newDirectionality,
-                    reportedHeadingDeg = opposite,
-                    userBearing = opposite,
-                )
-                val originalKey = com.roadwatch.data.SeedOverrides.keyOf(u.hazard)
-                if (store.upsertByKey(originalKey, updated)) {
-                    val updatedUser = u.copy(hazard = updated)
-                    notifyRefresh()
-                    refreshMarkers()
-                    dialog.dismiss()
-                    startMovePin(
-                        updatedUser,
-                        ctx.getString(com.roadwatch.app.R.string.move_pin_opposite_prompt)
-                    )
-                } else {
-                    com.roadwatch.ui.UiAlerts.error(view, "Update failed")
-                }
-            }
-
-            btnDelete?.setOnClickListener {
-                android.app.AlertDialog.Builder(ctx)
-                    .setTitle("Delete hazard?")
-                    .setMessage("This removes the hazard for all drivers.")
-                    .setPositiveButton("Delete") { _, _ ->
-                        if (store.delete(u.id)) {
-                            notifyRefresh()
-                            refreshMarkers()
-                            com.roadwatch.ui.UiAlerts.success(view, "Hazard deleted")
-                            dialog.dismiss()
-                        } else {
-                            com.roadwatch.ui.UiAlerts.error(view, "Delete failed")
-                        }
-                    }
-                    .setNegativeButton("Cancel", null)
-                    .show()
-            }
-        }
-
-        dialog.show()
+            .show()
     }
 
-    private var pendingMove: com.roadwatch.data.UserHazard? = null
-    private fun startMovePin(u: com.roadwatch.data.UserHazard, message: String? = null) {
+    private fun startMovePin(u: UserHazard, message: String? = null) {
         pendingMove = u
-        val prompt = message ?: getString(com.roadwatch.app.R.string.tap_map_set_location)
-        com.roadwatch.ui.UiAlerts.info(view, prompt)
+        UiAlerts.info(view, message ?: getString(R.string.tap_map_set_location))
         googleMap?.setOnMapClickListener { latLng ->
-            finalizeMovePin(latLng)
+            val target = pendingMove ?: return@setOnMapClickListener
+            HazardStore(requireContext()).update(target.id) { it.copy(lat = latLng.latitude, lng = latLng.longitude) }
+            googleMap?.setOnMapClickListener(null)
+            pendingMove = null
+            refreshMarkers()
+            UiAlerts.success(view, "Location updated")
         }
     }
-    private fun finalizeMovePin(latLng: com.google.android.gms.maps.model.LatLng) {
-        val u = pendingMove ?: return
-        val ctx = requireContext()
-        val store = com.roadwatch.data.HazardStore(ctx)
-        val originalKey = com.roadwatch.data.SeedOverrides.keyOf(u.hazard)
-        val updated = u.hazard.copy(lat = latLng.latitude, lng = latLng.longitude)
-        store.upsertByKey(originalKey, updated)
-        googleMap?.setOnMapClickListener(null)
-        pendingMove = null
-        notifyRefresh()
-        com.roadwatch.ui.UiAlerts.success(view, "Location updated")
-    }
 
-    private fun selectBestCandidate(candidates: List<HazardCandidate>): HazardCandidate? {
-        if (candidates.isEmpty()) return null
-        val nearest = candidates.minOf { it.effectiveAlong }
-        val window = candidates.filter { it.effectiveAlong - nearest <= PRIORITY_SUPERSEDE_DISTANCE_METERS }
-        if (window.isEmpty()) return null
-        val bestPriority = window.minOf { it.priority }
-        return window.filter { it.priority == bestPriority }
-            .minByOrNull { it.effectiveAlong }
-    }
-
-    private data class HazardCandidate(
-        val hazard: com.roadwatch.data.Hazard,
-        val along: Double,
-        val distance: Double,
-        val priority: Int,
-    ) {
-        val effectiveAlong: Double
-            get() = if (along > 0.0) along else 0.0
-    }
-
-    private fun hazardPriority(type: HazardType): Int = when (type) {
-        HazardType.SPEED_BUMP -> 0
-        HazardType.SPEED_LIMIT_ZONE -> 1
-        HazardType.POTHOLE -> 1
-        HazardType.RUMBLE_STRIP -> 2
-    }
-
-    private enum class HazardUrgency { NEUTRAL, CAUTION, WARN }
-
-    private fun Double.format(digits: Int = 6): String = String.format(Locale.US, "%.${digits}f", this)
-
-    private fun notifyRefresh() {
-        try {
-            val refreshIntent = android.content.Intent("com.roadwatch.REFRESH_HAZARDS")
-            requireContext().sendBroadcast(refreshIntent)
-        } catch (_: Exception) {}
+    companion object {
+        private const val WARN_DISTANCE_M = 75.0
+        private const val CAUTION_DISTANCE_M = 200.0
+        private const val MIN_MAP_ZOOM = 15.0f
+        private const val MAX_MAP_ZOOM = 20.0f
+        private const val DEFAULT_MAP_ZOOM = 18.5f
+        private const val MAX_MARKERS = 800
     }
 }

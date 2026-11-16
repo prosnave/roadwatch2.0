@@ -1,3 +1,5 @@
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Properties
 
 plugins {
@@ -24,12 +26,22 @@ android {
     }
     val mapsApiKey = localProperties.getProperty("MAPS_API_KEY", "")
 
+    // Identifies exactly which build produced a trip log / bug report. Field builds pass -PrwVersionCode.
+    fun git(vararg args: String): String = try {
+        val p = ProcessBuilder("git", *args).directory(rootProject.projectDir).redirectErrorStream(true).start()
+        p.inputStream.bufferedReader().readText().trim().also { p.waitFor() }
+    } catch (_: Exception) { "" }
+    val gitSha = git("rev-parse", "--short", "HEAD").ifBlank { "nogit" }
+    val dirty = if (git("status", "--porcelain", "--", "app/src").isNotBlank()) "+local" else ""
+    val buildStamp = SimpleDateFormat("yyyyMMdd-HHmm").format(Date())
+
     defaultConfig {
         applicationId = "com.roadwatch"
         minSdk = 26
-        targetSdk = 33  // Temporarily lowered to ensure compatibility
-        versionCode = 1
-        versionName = "1.0"
+        targetSdk = 34
+        versionCode = (project.findProperty("rwVersionCode") as String?)?.toInt() ?: 2
+        versionName = "1.2.0"
+        buildConfigField("String", "BUILD_ID", "\"$buildStamp-$gitSha$dirty\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -43,24 +55,18 @@ android {
         setProperty("archivesBaseName", "RoadWatch")
     }
 
-    signingConfigs {
-        create("release") {
-            storeFile = file("debug.keystore")
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
-        }
-    }
-
+    // Release builds are signed with the same debug certificate as the APKs already on the tester's
+    // phone, so installs UPDATE in place and keep the field data. Replace with a real upload/release key
+    // (kept outside the repo) before any Play Store or wider distribution; that forces a one-time reinstall.
     buildTypes {
         release {
-            isMinifyEnabled = true
-            isShrinkResources = true
+            isMinifyEnabled = false
+            isShrinkResources = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.getByName("release")
+            signingConfig = signingConfigs.getByName("debug")
         }
         debug {
             isMinifyEnabled = false
@@ -114,6 +120,8 @@ dependencies {
     implementation("com.google.android.gms:play-services-maps:18.2.0")
     implementation("androidx.navigation:navigation-fragment-ktx:2.7.7")
     // Avoid adding new network-resolved deps in this environment
+
+    testImplementation("junit:junit:4.13.2")
 }
 
 // Note: Rely on default AGP output naming using the base name set above.
